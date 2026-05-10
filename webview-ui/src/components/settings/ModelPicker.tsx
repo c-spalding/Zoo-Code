@@ -3,7 +3,14 @@ import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { ChevronsUpDown, Check, X, Info } from "lucide-react"
 
-import { type ProviderSettings, type ModelInfo, type OrganizationAllowList, isRetiredProvider } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ModelInfo,
+	type OrganizationAllowList,
+	isRetiredProvider,
+	isDynamicProvider,
+	isLocalProvider,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
@@ -305,7 +312,12 @@ export const ModelPicker = ({
 					{!hidePricing && (
 						<div className="text-sm text-vscode-descriptionForeground">
 							<Trans
-								i18nKey="settings:modelPicker.automaticFetch"
+								i18nKey={
+									isDynamicProvider(apiConfiguration.apiProvider ?? "") ||
+									isLocalProvider(apiConfiguration.apiProvider ?? "")
+										? "settings:modelPicker.automaticFetch"
+										: "settings:modelPicker.staticModelList"
+								}
 								components={{
 									serviceLink: <VSCodeLink href={serviceUrl} className="text-sm" />,
 									defaultModelLink: (
