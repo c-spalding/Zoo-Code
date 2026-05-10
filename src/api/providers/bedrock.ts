@@ -61,10 +61,14 @@ interface BedrockInferenceConfig {
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
 interface BedrockAdditionalModelFields {
-	thinking?: {
-		type: "enabled"
-		budget_tokens: number
-	}
+	thinking?:
+		| {
+				type: "enabled"
+				budget_tokens: number
+		  }
+		| {
+				type: "adaptive"
+		  }
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
@@ -392,11 +396,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
-			additionalModelRequestFields = {
-				thinking: {
-					type: "enabled",
-					budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
-				},
+			// Models with requiredAdaptiveThinking use adaptive thinking mode
+			// which does not accept a budget_tokens parameter.
+			if (modelConfig.info.requiredAdaptiveThinking) {
+				additionalModelRequestFields = {
+					thinking: {
+						type: "adaptive",
+					},
+				}
+			} else {
+				additionalModelRequestFields = {
+					thinking: {
+						type: "enabled",
+						budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
+					},
+				}
 			}
 			logger.info("Extended thinking enabled for Bedrock request", {
 				ctx: "bedrock",

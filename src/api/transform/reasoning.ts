@@ -108,8 +108,18 @@ export const getAnthropicReasoning = ({
 	model,
 	reasoningBudget,
 	settings,
-}: GetModelReasoningOptions): AnthropicReasoningParams | undefined =>
-	shouldUseReasoningBudget({ model, settings }) ? { type: "enabled", budget_tokens: reasoningBudget! } : undefined
+}: GetModelReasoningOptions): AnthropicReasoningParams | undefined => {
+	if (!shouldUseReasoningBudget({ model, settings })) {
+		return undefined
+	}
+	// Models with requiredAdaptiveThinking use adaptive thinking mode
+	// which does not accept a budget_tokens parameter.
+	if (model.requiredAdaptiveThinking) {
+		// Cast needed because BetaThinkingConfigParam may not include "adaptive" yet
+		return { type: "adaptive" } as AnthropicReasoningParams
+	}
+	return { type: "enabled", budget_tokens: reasoningBudget! }
+}
 
 export const getOpenAiReasoning = ({
 	model,

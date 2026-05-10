@@ -88,6 +88,9 @@ export const modelInfoSchema = z.object({
 	supportsTemperature: z.boolean().optional(),
 	defaultTemperature: z.number().optional(),
 	requiredReasoningBudget: z.boolean().optional(),
+	// Flag to indicate the model requires adaptive thinking (type: "adaptive")
+	// instead of explicit thinking with budget_tokens (type: "enabled")
+	requiredAdaptiveThinking: z.boolean().optional(),
 	supportsReasoningEffort: z
 		.union([z.boolean(), z.array(z.enum(["disable", "none", "minimal", "low", "medium", "high", "xhigh"]))])
 		.optional(),

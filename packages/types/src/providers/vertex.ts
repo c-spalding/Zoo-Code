@@ -379,11 +379,12 @@ export const vertexModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
-		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
-		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
+		inputPrice: 5.0, // $5 per million input tokens (<=200K context)
+		outputPrice: 25.0, // $25 per million output tokens (<=200K context)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
+		requiredAdaptiveThinking: true,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
 		tiers: [
 			{
