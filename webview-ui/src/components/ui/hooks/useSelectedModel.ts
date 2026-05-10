@@ -27,6 +27,8 @@ import {
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_DEFAULT_CONTEXT,
+	BEDROCK_MAX_TOKENS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
 	isRetiredProvider,
@@ -199,6 +201,19 @@ function getSelectedModel({
 					contextWindow: 1_000_000,
 				}
 				return { id, info }
+			}
+
+			// Fallback for custom/unknown model IDs not in the static list.
+			// Use user-configured values or sensible defaults to prevent
+			// broken token budget display (contextWindow of 1 causes extreme percentages).
+			if (!baseInfo) {
+				const fallbackInfo: ModelInfo = {
+					maxTokens: apiConfiguration.modelMaxTokens || BEDROCK_MAX_TOKENS,
+					contextWindow: apiConfiguration.awsModelContextWindow || BEDROCK_DEFAULT_CONTEXT,
+					supportsImages: false,
+					supportsPromptCache: false,
+				}
+				return { id, info: fallbackInfo }
 			}
 
 			return { id, info: baseInfo }

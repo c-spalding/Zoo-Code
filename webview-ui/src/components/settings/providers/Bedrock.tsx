@@ -10,6 +10,8 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
+	BEDROCK_DEFAULT_CONTEXT,
+	bedrockModels,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -40,6 +42,11 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 	// Check if the selected model supports service tiers
 	const supportsServiceTiers =
 		!!apiConfiguration?.apiModelId && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
+
+	// Check if the selected model has known info in the static list
+	const isKnownModel =
+		!!apiConfiguration?.apiModelId &&
+		(apiConfiguration.apiModelId in bedrockModels || apiConfiguration.apiModelId === "custom-arn")
 
 	// Update the endpoint enabled state when the configuration changes
 	useEffect(() => {
@@ -227,6 +234,34 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					<div className="text-sm text-vscode-descriptionForeground mt-1 ml-6">
 						{t("settings:providers.awsBedrock1MContextBetaDescription")}
 					</div>
+				</div>
+			)}
+			{!isKnownModel && apiConfiguration?.apiModelId && (
+				<div className="border border-vscode-input-border rounded p-3 space-y-3">
+					<div className="text-sm font-medium">{t("settings:providers.awsCustomModelConfig")}</div>
+					<div className="text-sm text-vscode-descriptionForeground -mt-2">
+						{t("settings:providers.awsCustomModelConfigDesc")}
+					</div>
+					<VSCodeTextField
+						value={apiConfiguration?.awsModelContextWindow?.toString() || ""}
+						onInput={(e) => {
+							const val = parseInt((e.target as HTMLInputElement).value, 10)
+							setApiConfigurationField("awsModelContextWindow", isNaN(val) ? undefined : val)
+						}}
+						placeholder={BEDROCK_DEFAULT_CONTEXT.toString()}
+						className="w-full">
+						<label className="block font-medium mb-1">{t("settings:providers.awsContextWindow")}</label>
+					</VSCodeTextField>
+					<VSCodeTextField
+						value={apiConfiguration?.modelMaxTokens?.toString() || ""}
+						onInput={(e) => {
+							const val = parseInt((e.target as HTMLInputElement).value, 10)
+							setApiConfigurationField("modelMaxTokens", isNaN(val) ? undefined : val)
+						}}
+						placeholder="4096"
+						className="w-full">
+						<label className="block font-medium mb-1">{t("settings:providers.awsMaxOutputTokens")}</label>
+					</VSCodeTextField>
 				</div>
 			)}
 			<Checkbox
