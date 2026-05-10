@@ -493,6 +493,8 @@
 		"awsServiceTierNote": "Service tiers affect pricing and performance. Flex offers 50% discount with higher latency, Priority offers 25% better performance with 75% premium.",
 		"awsCustomModelConfig": "Custom Model Configuration",
 		"awsCustomModelConfigDesc": "This model is not in the built-in list. Configure its capabilities for accurate token budget display and context management.",
+		"awsModelOverrideConfig": "Model Capability Overrides",
+		"awsModelOverrideConfigDesc": "Override the built-in context window or max output tokens if your Bedrock deployment differs from the defaults.",
 		"awsContextWindow": "Context Window (input tokens)",
 		"awsMaxOutputTokens": "Max Output Tokens",
 		"awsBedrockVpc": {

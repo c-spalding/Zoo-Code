@@ -216,7 +216,19 @@ function getSelectedModel({
 				return { id, info: fallbackInfo }
 			}
 
-			return { id, info: baseInfo }
+			// Mirror server-side getModelById() behaviour: always allow user overrides for
+			// maxTokens and contextWindow, even for known models whose static values may be
+			// wrong or outdated for the user's specific Bedrock deployment.
+			const overriddenInfo: ModelInfo = {
+				...baseInfo,
+				...(apiConfiguration.modelMaxTokens && apiConfiguration.modelMaxTokens > 0
+					? { maxTokens: apiConfiguration.modelMaxTokens }
+					: {}),
+				...(apiConfiguration.awsModelContextWindow && apiConfiguration.awsModelContextWindow > 0
+					? { contextWindow: apiConfiguration.awsModelContextWindow }
+					: {}),
+			}
+			return { id, info: overriddenInfo }
 		}
 		case "vertex": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

@@ -236,11 +236,17 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					</div>
 				</div>
 			)}
-			{!isKnownModel && apiConfiguration?.apiModelId && (
+			{apiConfiguration?.apiModelId && (
 				<div className="border border-vscode-input-border rounded p-3 space-y-3">
-					<div className="text-sm font-medium">{t("settings:providers.awsCustomModelConfig")}</div>
+					<div className="text-sm font-medium">
+						{isKnownModel
+							? t("settings:providers.awsModelOverrideConfig")
+							: t("settings:providers.awsCustomModelConfig")}
+					</div>
 					<div className="text-sm text-vscode-descriptionForeground -mt-2">
-						{t("settings:providers.awsCustomModelConfigDesc")}
+						{isKnownModel
+							? t("settings:providers.awsModelOverrideConfigDesc")
+							: t("settings:providers.awsCustomModelConfigDesc")}
 					</div>
 					<VSCodeTextField
 						value={apiConfiguration?.awsModelContextWindow?.toString() || ""}
