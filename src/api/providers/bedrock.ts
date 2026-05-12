@@ -61,10 +61,15 @@ interface BedrockInferenceConfig {
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
 interface BedrockAdditionalModelFields {
-	thinking?: {
-		type: "enabled"
-		budget_tokens: number
-	}
+	thinking?:
+		| {
+				type: "enabled"
+				budget_tokens: number
+		  }
+		| {
+				type: "adaptive"
+				effort?: "low" | "medium" | "high" | "max"
+		  }
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
@@ -389,15 +394,34 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			shouldUseReasoningBudget({ model: modelConfig.info, settings: this.options }) &&
 			modelConfig.reasoning &&
 			modelConfig.reasoningBudget
+		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		const usesAdaptiveThinking = baseModelId === "anthropic.claude-opus-4-7"
 
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
-			additionalModelRequestFields = {
-				thinking: {
-					type: "enabled",
-					budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
-				},
-			}
+			const adaptiveThinkingEffort = (() => {
+				switch (this.options.reasoningEffort) {
+					case "low":
+					case "medium":
+					case "high":
+						return this.options.reasoningEffort
+					default:
+						return undefined
+				}
+			})()
+			additionalModelRequestFields = usesAdaptiveThinking
+				? {
+						thinking: {
+							type: "adaptive",
+							...(adaptiveThinkingEffort ? { effort: adaptiveThinkingEffort } : {}),
+						},
+					}
+				: {
+						thinking: {
+							type: "enabled",
+							budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
+						},
+					}
 			logger.info("Extended thinking enabled for Bedrock request", {
 				ctx: "bedrock",
 				modelId: modelConfig.id,
@@ -407,12 +431,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-			temperature: modelConfig.temperature ?? (this.options.modelTemperature as number),
+			temperature: modelConfig.temperature,
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
-		// Use parseBaseModelId to handle cross-region inference prefixes
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
 		const is1MContextEnabled =
 			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext
 

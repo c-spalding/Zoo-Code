@@ -73,6 +73,24 @@ describe("AwsBedrockHandler", () => {
 			expect(modelInfo.info.contextWindow).toBeDefined()
 		})
 
+		it("should return the correct model info for Claude Opus 4.7", () => {
+			const opusHandler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				modelTemperature: 0.2,
+			})
+
+			const modelInfo = opusHandler.getModel()
+
+			expect(modelInfo.id).toBe("anthropic.claude-opus-4-7")
+			expect(modelInfo.info.contextWindow).toBe(1_000_000)
+			expect(modelInfo.info.maxTokens).toBe(128_000)
+			expect(modelInfo.info.supportsTemperature).toBe(false)
+			expect(modelInfo.temperature).toBeUndefined()
+		})
+
 		it("should use custom ARN when provided", () => {
 			// This test is incompatible with the refactored implementation
 			// The implementation now extracts the model ID from the ARN instead of using the ARN directly
@@ -841,6 +859,53 @@ describe("AwsBedrockHandler", () => {
 			)
 			// Should NOT include 1M context beta for non-Sonnet 4 models
 			expect(commandArg.additionalModelRequestFields.anthropic_beta).not.toContain("context-1m-2025-08-07")
+		})
+
+		it("should use adaptive thinking and omit temperature for Claude Opus 4.7", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "medium",
+				modelTemperature: 0.4,
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: "Test message",
+				},
+			]
+
+			const generator = handler.createMessage("", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			expect(commandArg.additionalModelRequestFields).toBeDefined()
+			expect(commandArg.additionalModelRequestFields.thinking).toEqual({
+				type: "adaptive",
+				effort: "medium",
+			})
+			expect(commandArg.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
+			expect(commandArg.inferenceConfig.temperature).toBeUndefined()
+		})
+
+		it("should use global inference for Claude Opus 4.7 when enabled", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+
+			expect(model.id).toBe("global.anthropic.claude-opus-4-7")
 		})
 
 		it("should enable 1M context window with cross-region inference for Claude Sonnet 4", () => {
