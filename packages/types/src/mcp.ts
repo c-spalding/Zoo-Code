@@ -125,6 +125,19 @@ export type McpToolCallResponse = {
 					blob?: string
 				}
 		  }
+		// `resource_link` was added in @modelcontextprotocol/sdk 1.13+. It's a URI pointer
+		// without inline data (unlike `resource` which embeds the content). Including it
+		// here keeps `McpToolCallResponse` assignable from `CallToolResult` returned by
+		// `client.request(..., CallToolResultSchema, ...)`.
+		| {
+				type: "resource_link"
+				uri: string
+				name?: string
+				title?: string
+				description?: string
+				mimeType?: string
+				size?: number
+		  }
 	>
 	isError?: boolean
 }
