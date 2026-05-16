@@ -85,7 +85,12 @@ describe("AwsBedrockHandler", () => {
 			const modelInfo = opusHandler.getModel()
 
 			expect(modelInfo.id).toBe("anthropic.claude-opus-4-7")
-			expect(modelInfo.info.contextWindow).toBe(1_000_000)
+			// Opus 4.7's base context is 200K with a 1M tier exposed via the `:1m` UI
+			// suffix / awsBedrock1MContext toggle. The handler does NOT auto-flip to 1M
+			// because BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS is intentionally empty (see
+			// the comment above its declaration in packages/types/src/providers/bedrock.ts).
+			expect(modelInfo.info.contextWindow).toBe(200_000)
+			expect(modelInfo.info.tiers?.[0]?.contextWindow).toBe(1_000_000)
 			expect(modelInfo.info.maxTokens).toBe(128_000)
 			expect(modelInfo.info.supportsTemperature).toBe(false)
 			expect(modelInfo.temperature).toBeUndefined()
@@ -886,11 +891,16 @@ describe("AwsBedrockHandler", () => {
 			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
-			expect(commandArg.additionalModelRequestFields.thinking).toEqual({
-				type: "adaptive",
-				effort: "medium",
-			})
+			// Bedrock's adaptive-thinking shape sends `thinking: { type: "adaptive" }` inside
+			// additionalModelRequestFields and `output_config: { effort: ... }` at the top
+			// level of the payload (sibling of inferenceConfig and additionalModelRequestFields).
+			// AWS itself spells this out in the rejection message for the legacy shape; see
+			// the comment block above BEDROCK_ADAPTIVE_THINKING_MODEL_IDS in
+			// packages/types/src/providers/bedrock.ts.
+			expect(commandArg.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
 			expect(commandArg.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
+			expect(commandArg.additionalModelRequestFields.thinking.effort).toBeUndefined()
+			expect(commandArg.output_config).toEqual({ effort: "medium" })
 			expect(commandArg.inferenceConfig.temperature).toBeUndefined()
 		})
 
