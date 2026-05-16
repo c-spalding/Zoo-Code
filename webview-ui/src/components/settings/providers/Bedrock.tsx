@@ -134,12 +134,15 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 		[],
 	)
 
-	// Discovered targets from AWS may or may not include separate 1M profiles. Run them through
-	// the same helper so the dropdown always offers both context-window variants side-by-side.
-	const availableTargets = useMemo(() => {
-		const base = discoveredTargets.length > 0 ? discoveredTargets : fallbackTargets
-		return discoveredTargets.length > 0 ? expandBedrockTargetsWith1MVariants(base) : base
-	}, [discoveredTargets, fallbackTargets])
+	// Both `discoverBedrockTargets` (extension side) and `fallbackTargets` (above)
+	// already run their inputs through `expandBedrockTargetsWith1MVariants`, so any
+	// 1M-capable model is paired with its `:1m` synthetic twin before it reaches us.
+	// Re-running the helper here would re-expand every base entry a SECOND time and
+	// produce duplicate `:1m` rows in the dropdown, so we just pick the right list.
+	const availableTargets = useMemo(
+		() => (discoveredTargets.length > 0 ? discoveredTargets : fallbackTargets),
+		[discoveredTargets, fallbackTargets],
+	)
 
 	const selectedTargetValue =
 		apiConfiguration.awsCustomArn || selectedTargetKind === "custom-arn"
