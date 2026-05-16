@@ -17,6 +17,17 @@ export async function getUnboundModels(apiKey?: string | null): Promise<Record<s
 		const response = await axios.get("https://api.getunbound.ai/models", { headers })
 		const rawModels = response.data?.data ?? response.data
 
+		// Defensively handle Unbound returning a non-array shape (error envelope or
+		// keyed object map). Without this guard the for...of below crashes with
+		// "rawModels is not iterable", which surfaces as an unhandled rejection
+		// from the requestRouterModels message handler and restarts the dev host.
+		if (!Array.isArray(rawModels)) {
+			console.warn(
+				`Unbound /models returned a non-array payload (got ${typeof rawModels}); skipping fetch and returning an empty model list.`,
+			)
+			return models
+		}
+
 		for (const rawModel of rawModels) {
 			const modelInfo: ModelInfo = {
 				maxTokens: rawModel.max_output_tokens ?? 8192,
