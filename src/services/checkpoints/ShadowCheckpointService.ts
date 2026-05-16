@@ -62,6 +62,18 @@ function createSanitizedGit(baseDir: string): SimpleGit {
 	const options: Partial<SimpleGitOptions> = {
 		baseDir,
 		config: [],
+		// simple-git 3.36+ blocks any use of the `--template` flag unless the
+		// caller explicitly opts in via `allowUnsafeTemplateDir`. We use
+		// `--template=""` in initShadowGit() *defensively* - to disable the
+		// system / user template dir so that pre-existing git hooks cannot
+		// leak into the shadow checkpoint repo. The empty string is the
+		// safest possible value, and combined with the GIT_TEMPLATE_DIR strip
+		// in this same function it ensures no template content reaches the
+		// shadow repo. Opting in here documents that intent and unblocks the
+		// CVE-mitigation guard for our deliberately-safe usage.
+		unsafe: {
+			allowUnsafeTemplateDir: true,
+		},
 	}
 
 	// Create git instance and set the sanitized environment
