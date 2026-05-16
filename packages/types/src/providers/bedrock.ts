@@ -188,6 +188,11 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		// Opus 4.7 rejects requests that include a temperature parameter; the Bedrock
+		// inferenceConfig must omit it. The model-params layer honors this flag by
+		// setting params.temperature = undefined, and the Bedrock handler drops the
+		// modelTemperature fallback so that nothing reaches the wire.
+		supportsTemperature: false,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
 		cacheWritesPrice: 6.25,
