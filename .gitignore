@@ -55,3 +55,6 @@ qdrant_storage/
 plans/
 
 roo-cli-*.tar.gz*
+
+# Playwright MCP runtime artifacts (per-test logs and page snapshots)
+.playwright-mcp/
