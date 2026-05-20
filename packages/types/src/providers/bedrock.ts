@@ -471,7 +471,11 @@ export const bedrockModels = {
 		outputPrice: 0.6,
 		description: "Amazon Titan Text Express",
 	},
-	"moonshot.kimi-k2-thinking": {
+	// AWS Bedrock publishes Moonshot AI models under the `moonshotai.` prefix (note the
+	// trailing `i`). PR #125 originally added the entry below as `moonshot.kimi-k2-thinking`
+	// which never matched the AWS-side id, so `parseBedrockBaseModelId` fell through to the
+	// 128K-context default in `guessBedrockModelInfoFromId`. Use the correct prefix.
+	"moonshotai.kimi-k2-thinking": {
 		maxTokens: 32_000,
 		contextWindow: 262_144,
 		supportsImages: false,
