@@ -85,6 +85,18 @@ const buildFoundationTarget = (summary: FoundationModelSummary): BedrockDiscover
 		return undefined
 	}
 
+	// AWS surfaces some foundation models that are only invokable via an inference profile
+	// (e.g. moonshotai.kimi-k2.5 in 2026). Calling Converse with the bare model id results in
+	// "The provided model identifier is invalid". The control-plane response advertises this
+	// up front via `inferenceTypesSupported`; if AWS lists supported types and ON_DEMAND is
+	// NOT among them, surfacing this as a "Direct model" dropdown entry is misleading and the
+	// resulting invocation will always fail. Skip it -- the user can still pick the matching
+	// inference-profile entry (or supply a custom ARN) instead.
+	const inferenceTypes = summary.inferenceTypesSupported
+	if (Array.isArray(inferenceTypes) && inferenceTypes.length > 0 && !inferenceTypes.includes("ON_DEMAND")) {
+		return undefined
+	}
+
 	const resolved = resolveBedrockModelInfo({ baseModelId: targetId, targetId })
 	const parsedArn = parseBedrockArn(summary.modelArn)
 
