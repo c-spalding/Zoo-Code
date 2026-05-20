@@ -543,7 +543,10 @@
 			"detectMaxTokensSuccess": "Detected cap: {{value}} tokens (source: {{source}}, attempts: {{attempts}}). The slider now extends to this value.",
 			"detectMaxTokensOverrideActive": "Custom cap active: {{value}} tokens. Click \"Reset to default\" to revert to the built-in table.",
 			"detectMaxTokensError": "Detection failed: {{error}}",
-			"detectMaxTokensReset": "Reset to default"
+			"detectMaxTokensReset": "Reset to default",
+			"contextWindowOverrideLabel": "Override context window (tokens)",
+			"contextWindowOverrideDescription": "AWS Bedrock does not publish per-model context window sizes through any control-plane API, so Zoo Code falls back to a static table for unknown models (default {{default}}). If the actual context window of the model you're using differs, enter the correct value here. Leave blank to use the model's catalog value.",
+			"contextWindowOverridePlaceholder": "e.g. 262144"
 		},
 		"openRouter": {
 			"providerRouting": {
