@@ -2503,7 +2503,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// the user hits max requests and denies resetting the count.
 				break
 			} else {
-				nextUserContent = [{ type: "text", text: formatResponse.noToolsUsed() }]
+				const loopState = await this.providerRef.deref()?.getState()
+				const allowTextOnly = loopState?.apiConfiguration?.allowTextOnlyResponses ?? false
+				if (allowTextOnly && !loopState?.autoApprovalEnabled) {
+					// In non-auto-approval mode with text-only responses allowed, simply end
+					// the loop so the user can respond naturally in the chat input.
+					break
+				}
+				// In auto-approval mode or when text-only is not allowed, send the appropriate message.
+				const message = allowTextOnly ? formatResponse.softNudge() : formatResponse.noToolsUsed()
+				nextUserContent = [{ type: "text", text: message }]
 			}
 		}
 	}
@@ -3636,28 +3645,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const allowTextOnly = currentState?.apiConfiguration?.allowTextOnlyResponses ?? false
 
 						if (allowTextOnly) {
-							// Increment the no-tool-use counter but do NOT immediately count as a mistake.
-							// The first soft-nudge is grace; only escalate after repeated failures.
+							// Increment counter for tracking consecutive text-only responses
 							this.consecutiveNoToolUseCount++
 
+							// Only count toward mistake limit after multiple consecutive text-only turns
 							if (this.consecutiveNoToolUseCount >= 2) {
-								// Repeated text-only turns: count toward the mistake limit so the
-								// safety valve still fires if the model keeps ignoring tools.
 								this.consecutiveMistakeCount++
 							}
 
-							// Present the model's text response as a followup ask.
-							// This reuses the existing followup auto-approval infrastructure:
-							// - If alwaysAllowFollowupQuestions is true, a timer starts and the
-							//   soft nudge is sent automatically when it fires.
-							// - Otherwise, the user can respond directly (natural conversation).
-							const followUpData = JSON.stringify({
-								question: assistantMessage,
-								suggest: [{ answer: formatResponse.softNudge() }],
-							})
-							const { text: responseText } = await this.ask("followup", followUpData, false)
-							if (responseText) {
-								this.userMessageContent.push({ type: "text", text: responseText })
+							// The model's text is already displayed via the normal streaming path.
+							// Do NOT re-display it here.
+							// In auto-approval mode, send a soft nudge to keep the loop going.
+							// In non-auto-approval mode, don't push anything - the task will end
+							// this loop iteration and wait for user input naturally.
+							if (currentState?.autoApprovalEnabled) {
+								this.userMessageContent.push({
+									type: "text",
+									text: formatResponse.softNudge(),
+								})
 							}
 						} else {
 							// Default behaviour: treat the missing tool call as an error and
