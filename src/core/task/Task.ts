@@ -2542,14 +2542,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const isTimerFired = responseText === softNudgeText
 
 					if (isTimerFired) {
-						// The auto-approve timer fired.  Reset the no-tool-use counter so
-						// each nudge cycle is treated as a fresh start for tracking purposes.
-						// consecutiveMistakeCount is NOT reset here: in allowTextOnly mode it
-						// is never incremented for text-only turns, so there is nothing to reset.
-						this.consecutiveNoToolUseCount = 0
+						// The auto-approve timer fired.  Do NOT reset consecutiveNoToolUseCount
+						// here - we want it to accumulate across nudge cycles so that repeated
+						// text-only responses eventually cause consecutiveMistakeCount to reach
+						// the limit (see recursivelyMakeClineRequests allowTextOnly branch).
 					} else {
 						// User typed a reply - persist it as a "You said" bubble.
 						await this.say("user_feedback", responseText, responseImages)
+						// User actively intervened - reset counters so their message starts
+						// a fresh window for mistake-limit tracking.
+						this.consecutiveNoToolUseCount = 0
+						this.consecutiveMistakeCount = 0
 					}
 
 					nextUserContent = [{ type: "text", text: responseText }]
@@ -3706,9 +3709,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						if (allowTextOnly) {
 							// Increment counter to track frequency of text-only turns.
-							// This is informational - in allowTextOnly mode, a text response
-							// is expected behaviour and does NOT count as a mistake.
 							this.consecutiveNoToolUseCount++
+
+							// After 2 consecutive text-only turns, count toward the mistake limit.
+							// We do NOT show "MODEL_NO_TOOLS_USED" because text-only responses are
+							// expected in this mode, but we still need to enforce a ceiling to
+							// prevent infinite nudge loops when the model is stuck.
+							if (this.consecutiveNoToolUseCount >= 2) {
+								this.consecutiveMistakeCount++
+							}
 
 							// The model's text is already displayed via the normal streaming path.
 							// Do NOT push any userMessageContent here - leave it empty so the
