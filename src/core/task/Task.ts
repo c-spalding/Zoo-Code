@@ -2514,21 +2514,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// allowTextOnlyResponses is true - the model gave a text-only response.
 				// The text was already streamed to the UI; do not display it again.
+				// Issue a silent followup ask to pause the loop.  We must use ask()
+				// in both modes so that the user's reply is captured via the normal
+				// ask/response path and saved to the conversation history.
+				//
+				// - Non-auto-approve: suggest is empty, so FollowUpSuggest renders
+				//   nothing and no timer starts.  The loop simply waits for the user
+				//   to type their next message in the chat input.
+				// - Auto-approve: suggest[0] carries the soft-nudge text; checkAutoApproval
+				//   fires after followupAutoApproveTimeoutMs and sends it as the response.
+				const suggestions = loopState?.autoApprovalEnabled ? [{ answer: formatResponse.softNudge() }] : []
 
-				if (!loopState?.autoApprovalEnabled) {
-					// Non-auto-approve: simply end the loop.  The chat input is now
-					// active and the user can type their next message naturally.
-					break
-				}
-
-				// Auto-approve mode: issue a silent followup ask that fires after
-				// followupAutoApproveTimeoutMs and sends the soft-nudge text.
-				// The ask is invisible in the UI (silent:true) but the timeout in
-				// checkAutoApproval will auto-select suggest[0] after the delay.
 				const silentPayload = JSON.stringify({
 					question: "",
 					silent: true,
-					suggest: [{ answer: formatResponse.softNudge() }],
+					suggest: suggestions,
 				})
 
 				const { response, text: responseText } = await this.ask("followup", silentPayload)
@@ -2537,7 +2537,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Either the timer fired (soft-nudge) or the user typed something.
 					nextUserContent = [{ type: "text", text: responseText }]
 				} else {
-					// User dismissed or task was aborted - end the loop.
+					// User dismissed / yesButtonClicked / noButtonClicked / task aborted.
 					break
 				}
 			}
