@@ -2542,11 +2542,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const isTimerFired = responseText === softNudgeText
 
 					if (isTimerFired) {
-						// The auto-approve timer fired.  Reset the no-tool-use counters so
-						// each nudge cycle gives the model a fresh chance - otherwise the
-						// mistake limit is reached just from repeated conversational turns.
+						// The auto-approve timer fired.  Reset the no-tool-use counter so
+						// each nudge cycle is treated as a fresh start for tracking purposes.
+						// consecutiveMistakeCount is NOT reset here: in allowTextOnly mode it
+						// is never incremented for text-only turns, so there is nothing to reset.
 						this.consecutiveNoToolUseCount = 0
-						this.consecutiveMistakeCount = 0
 					} else {
 						// User typed a reply - persist it as a "You said" bubble.
 						await this.say("user_feedback", responseText, responseImages)
@@ -3705,19 +3705,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const allowTextOnly = currentState?.apiConfiguration?.allowTextOnlyResponses ?? false
 
 						if (allowTextOnly) {
-							// Increment counter for tracking consecutive text-only responses
+							// Increment counter to track frequency of text-only turns.
+							// This is informational - in allowTextOnly mode, a text response
+							// is expected behaviour and does NOT count as a mistake.
 							this.consecutiveNoToolUseCount++
-
-							// Only count toward mistake limit after multiple consecutive text-only turns
-							if (this.consecutiveNoToolUseCount >= 2) {
-								this.consecutiveMistakeCount++
-							}
 
 							// The model's text is already displayed via the normal streaming path.
 							// Do NOT push any userMessageContent here - leave it empty so the
 							// inner stack loop exits and control returns to initiateTaskLoop.
 							// initiateTaskLoop is responsible for the pause/nudge behaviour:
-							//   - non-auto-approve: breaks the outer loop (user types next)
+							//   - non-auto-approve: issues a silent followup ask and waits for user
 							//   - auto-approve: issues a silent followup ask that fires after
 							//     followupAutoApproveTimeoutMs and sends the soft-nudge text
 						} else {
