@@ -2505,14 +2505,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else {
 				const loopState = await this.providerRef.deref()?.getState()
 				const allowTextOnly = loopState?.apiConfiguration?.allowTextOnlyResponses ?? false
-				if (allowTextOnly && !loopState?.autoApprovalEnabled) {
-					// In non-auto-approval mode with text-only responses allowed, simply end
-					// the loop so the user can respond naturally in the chat input.
+
+				if (!allowTextOnly) {
+					// Default behaviour: tell the model to use a tool or attempt_completion.
+					nextUserContent = [{ type: "text", text: formatResponse.noToolsUsed() }]
+					continue
+				}
+
+				// allowTextOnlyResponses is true - the model gave a text-only response.
+				// The text was already streamed to the UI; do not display it again.
+
+				if (!loopState?.autoApprovalEnabled) {
+					// Non-auto-approve: simply end the loop.  The chat input is now
+					// active and the user can type their next message naturally.
 					break
 				}
-				// In auto-approval mode or when text-only is not allowed, send the appropriate message.
-				const message = allowTextOnly ? formatResponse.softNudge() : formatResponse.noToolsUsed()
-				nextUserContent = [{ type: "text", text: message }]
+
+				// Auto-approve mode: issue a silent followup ask that fires after
+				// followupAutoApproveTimeoutMs and sends the soft-nudge text.
+				// The ask is invisible in the UI (silent:true) but the timeout in
+				// checkAutoApproval will auto-select suggest[0] after the delay.
+				const silentPayload = JSON.stringify({
+					question: "",
+					silent: true,
+					suggest: [{ answer: formatResponse.softNudge() }],
+				})
+
+				const { response, text: responseText } = await this.ask("followup", silentPayload)
+
+				if (response === "messageResponse" && responseText) {
+					// Either the timer fired (soft-nudge) or the user typed something.
+					nextUserContent = [{ type: "text", text: responseText }]
+				} else {
+					// User dismissed or task was aborted - end the loop.
+					break
+				}
 			}
 		}
 	}
@@ -3654,16 +3681,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 
 							// The model's text is already displayed via the normal streaming path.
-							// Do NOT re-display it here.
-							// In auto-approval mode, send a soft nudge to keep the loop going.
-							// In non-auto-approval mode, don't push anything - the task will end
-							// this loop iteration and wait for user input naturally.
-							if (currentState?.autoApprovalEnabled) {
-								this.userMessageContent.push({
-									type: "text",
-									text: formatResponse.softNudge(),
-								})
-							}
+							// Do NOT push any userMessageContent here - leave it empty so the
+							// inner stack loop exits and control returns to initiateTaskLoop.
+							// initiateTaskLoop is responsible for the pause/nudge behaviour:
+							//   - non-auto-approve: breaks the outer loop (user types next)
+							//   - auto-approve: issues a silent followup ask that fires after
+							//     followupAutoApproveTimeoutMs and sends the soft-nudge text
 						} else {
 							// Default behaviour: treat the missing tool call as an error and
 							// force a retry using the standard noToolsUsed message.

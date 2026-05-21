@@ -33,4 +33,13 @@ describe("formatResponse.softNudge", () => {
 		// Should not start with [ERROR] (confirmed above), should encourage proceeding
 		expect(result).not.toMatch(/^\[ERROR\]/)
 	})
+
+	it("should NOT be wrapped in square brackets", () => {
+		const result = formatResponse.softNudge()
+
+		// Square brackets confuse some models into treating the message as a
+		// system-level directive rather than a conversational nudge.
+		expect(result.startsWith("[")).toBe(false)
+		expect(result.endsWith("]")).toBe(false)
+	})
 })

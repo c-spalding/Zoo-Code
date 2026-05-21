@@ -1668,6 +1668,11 @@ export const ChatRowContent = ({
 						return null // Don't render anything when we get a completion_result ask without text
 					}
 				case "followup":
+					// When silent:true the ask is invisible - it exists only to drive the
+					// auto-approval timeout; nothing is rendered to the user.
+					if (followUpData?.silent) {
+						return null
+					}
 					return (
 						<>
 							{title && (

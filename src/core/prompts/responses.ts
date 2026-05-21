@@ -58,9 +58,9 @@ Otherwise, if you have not completed the task and do not need additional informa
 	// followupAutoApproveTimeoutMs timer fires before the user responds.
 	// Framed as guidance rather than an error so the model does not spiral.
 	softNudge: () =>
-		`[The user is not currently available to respond. Please proceed with the next step of the task using the appropriate tools, or call attempt_completion if you believe the task is finished.
+		`The user is not currently available to respond. Please proceed with the next step of the task using the appropriate tools, or call attempt_completion if you believe the task is finished.
 
-This is an automated message, so do not respond to it conversationally.]`,
+This is an automated message, so do not respond to it conversationally.`,
 
 	tooManyMistakes: (feedback?: string) =>
 		JSON.stringify({
