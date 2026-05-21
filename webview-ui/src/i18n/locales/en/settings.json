@@ -840,6 +840,10 @@
 		"todoList": {
 			"label": "Enable todo list tool",
 			"description": "When enabled, Zoo can create and manage todo lists to track task progress. This helps organize complex tasks into manageable steps."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Allow text-only responses",
+			"description": "When enabled, models can respond with text alone without being forced to call a tool. Useful for open-weight models that prefer to explain before acting."
 		}
 	},
 	"experimental": {
