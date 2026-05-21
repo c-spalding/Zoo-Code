@@ -194,6 +194,10 @@ const baseProviderSettingsSchema = z.object({
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
 
+	// Custom instructions appended to the system prompt when this profile is active.
+	// Combined with global custom instructions and mode-specific instructions.
+	customInstructions: z.string().optional(),
+
 	// Model verbosity.
 	verbosity: verbosityLevelsSchema.optional(),
 })
