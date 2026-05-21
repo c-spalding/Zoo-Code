@@ -2531,11 +2531,38 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					suggest: suggestions,
 				})
 
-				const { response, text: responseText } = await this.ask("followup", silentPayload)
+				const {
+					response,
+					text: responseText,
+					images: responseImages,
+				} = await this.ask("followup", silentPayload)
 
 				if (response === "messageResponse" && responseText) {
-					// Either the timer fired (soft-nudge) or the user typed something.
+					const softNudgeText = formatResponse.softNudge()
+					const isTimerFired = responseText === softNudgeText
+
+					if (!isTimerFired) {
+						// User typed a reply - persist it as a "You said" bubble.
+						await this.say("user_feedback", responseText, responseImages)
+					}
+
 					nextUserContent = [{ type: "text", text: responseText }]
+
+					if (responseImages && responseImages.length > 0) {
+						nextUserContent.push(
+							...responseImages.map(
+								(image) =>
+									({
+										type: "image",
+										source: {
+											type: "base64",
+											media_type: image.startsWith("data:image/png") ? "image/png" : "image/jpeg",
+											data: image.split(",")[1],
+										},
+									}) as Anthropic.Messages.ImageBlockParam,
+							),
+						)
+					}
 				} else {
 					// User dismissed / yesButtonClicked / noButtonClicked / task aborted.
 					break
