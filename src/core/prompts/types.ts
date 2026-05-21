@@ -9,4 +9,9 @@ export interface SystemPromptSettings {
 	newTaskRequireTodos: boolean
 	/** When true, model should hide vendor/company identity in responses */
 	isStealthModel?: boolean
+	/**
+	 * When true, text-only responses from the model are accepted without forcing
+	 * a tool-use retry. The system prompt instruction is softened accordingly.
+	 */
+	allowTextOnlyResponses?: boolean
 }

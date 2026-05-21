@@ -3630,21 +3630,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 
 					if (!didToolUse) {
-						// Increment consecutive no-tool-use counter
-						this.consecutiveNoToolUseCount++
+						// Fetch the latest provider settings to check the allowTextOnlyResponses flag.
+						// We re-read state here (not cached) so the user can toggle it mid-session.
+						const currentState = await this.providerRef.deref()?.getState()
+						const allowTextOnly = currentState?.apiConfiguration?.allowTextOnlyResponses ?? false
 
-						// Only show error and count toward mistake limit after 2 consecutive failures
-						if (this.consecutiveNoToolUseCount >= 2) {
-							await this.say("error", "MODEL_NO_TOOLS_USED")
-							// Only count toward mistake limit after second consecutive failure
-							this.consecutiveMistakeCount++
+						if (allowTextOnly) {
+							// Increment the no-tool-use counter but do NOT immediately count as a mistake.
+							// The first soft-nudge is grace; only escalate after repeated failures.
+							this.consecutiveNoToolUseCount++
+
+							if (this.consecutiveNoToolUseCount >= 2) {
+								// Repeated text-only turns: count toward the mistake limit so the
+								// safety valve still fires if the model keeps ignoring tools.
+								this.consecutiveMistakeCount++
+							}
+
+							// Present the model's text response as a followup ask.
+							// This reuses the existing followup auto-approval infrastructure:
+							// - If alwaysAllowFollowupQuestions is true, a timer starts and the
+							//   soft nudge is sent automatically when it fires.
+							// - Otherwise, the user can respond directly (natural conversation).
+							const followUpData = JSON.stringify({
+								question: assistantMessage,
+								suggest: [{ answer: formatResponse.softNudge() }],
+							})
+							const { text: responseText } = await this.ask("followup", followUpData, false)
+							if (responseText) {
+								this.userMessageContent.push({ type: "text", text: responseText })
+							}
+						} else {
+							// Default behaviour: treat the missing tool call as an error and
+							// force a retry using the standard noToolsUsed message.
+
+							// Increment consecutive no-tool-use counter
+							this.consecutiveNoToolUseCount++
+
+							// Only show error and count toward mistake limit after 2 consecutive failures
+							if (this.consecutiveNoToolUseCount >= 2) {
+								await this.say("error", "MODEL_NO_TOOLS_USED")
+								// Only count toward mistake limit after second consecutive failure
+								this.consecutiveMistakeCount++
+							}
+
+							// Use the task's locked protocol for consistent behavior
+							this.userMessageContent.push({
+								type: "text",
+								text: formatResponse.noToolsUsed(),
+							})
 						}
-
-						// Use the task's locked protocol for consistent behavior
-						this.userMessageContent.push({
-							type: "text",
-							text: formatResponse.noToolsUsed(),
-						})
 					} else {
 						// Reset counter when tools are used successfully
 						this.consecutiveNoToolUseCount = 0
@@ -3851,6 +3885,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						.getConfiguration(Package.name)
 						.get<boolean>("newTaskRequireTodos", false),
 					isStealthModel: modelInfo?.isStealthModel,
+					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 				},
 				undefined, // todoList
 				this.api.getModel().id,
