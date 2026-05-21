@@ -2541,7 +2541,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const softNudgeText = formatResponse.softNudge()
 					const isTimerFired = responseText === softNudgeText
 
-					if (!isTimerFired) {
+					if (isTimerFired) {
+						// The auto-approve timer fired.  Reset the no-tool-use counters so
+						// each nudge cycle gives the model a fresh chance - otherwise the
+						// mistake limit is reached just from repeated conversational turns.
+						this.consecutiveNoToolUseCount = 0
+						this.consecutiveMistakeCount = 0
+					} else {
 						// User typed a reply - persist it as a "You said" bubble.
 						await this.say("user_feedback", responseText, responseImages)
 					}
