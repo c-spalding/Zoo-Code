@@ -34,6 +34,49 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 	}
 })
 
+// Mock the control-plane client used by AwsBedrockHandler's lazy cross-region
+// inference profile discovery. Without this mock, the handler's constructor would
+// kick off a real `ListInferenceProfilesCommand` against AWS during every test that
+// has `awsUseCrossRegionInference: true` set, which is both noisy and unnecessary.
+// Returning an empty `inferenceProfileSummaries` array keeps the discovery cache
+// resolved-but-empty (`Set<string>` with no entries), which means the foundation-
+// model branch in `getModel()` will treat ALL prefixed ids as not-yet-published.
+// Existing tests assert that the prefix IS applied for known Anthropic models, so
+// we expose a vi.fn-backed `mockSend` that defaults to returning the union of all
+// AWS_INFERENCE_PROFILE_MAPPING prefixes paired with the existing Anthropic id used
+// in those assertions. Tests that need different behavior can override `mockSend`.
+vi.mock("@aws-sdk/client-bedrock", () => {
+	// Pre-seed with the regional profile ids the existing tests expect to be
+	// "published" by AWS for the model ids those tests use. When new tests need
+	// other ids they can re-mock the BedrockClient per-test (the `send` fn is
+	// vi.fn-backed and can have its return value overridden inline).
+	//
+	// IMPORTANT: tests that assert `commandArg.modelId === "us.<base>"` exercise
+	// the ASYNC path (await generator.next()), which means the gate in
+	// getModel() will only apply the prefix when the candidate prefixed id is in
+	// the resolved Set. Every such id MUST therefore be present below.
+	const seededProfileIds = [
+		// Claude 3.5 Sonnet across all three regions
+		"us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+		"eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
+		"apac.anthropic.claude-3-5-sonnet-20241022-v2:0",
+		// Claude Sonnet 4 (BEDROCK_1M_CONTEXT_MODEL_IDS[0])
+		"us.anthropic.claude-sonnet-4-20250514-v1:0",
+		// Amazon Nova Lite (BEDROCK_SERVICE_TIER_MODEL_IDS[0])
+		"us.amazon.nova-lite-v1:0",
+	]
+	const mockSend = vi.fn().mockResolvedValue({
+		inferenceProfileSummaries: seededProfileIds.map((id) => ({ inferenceProfileId: id })),
+		nextToken: undefined,
+	})
+	return {
+		BedrockClient: vi.fn().mockImplementation(() => ({
+			send: mockSend,
+		})),
+		ListInferenceProfilesCommand: vi.fn(),
+	}
+})
+
 import { AwsBedrockHandler } from "../bedrock"
 import { ConverseStreamCommand, BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime"
 import {

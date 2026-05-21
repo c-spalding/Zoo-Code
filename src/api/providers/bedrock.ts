@@ -11,6 +11,7 @@ import {
 	ToolConfiguration,
 	ToolChoice,
 } from "@aws-sdk/client-bedrock-runtime"
+import { BedrockClient, ListInferenceProfilesCommand, type BedrockClientConfig } from "@aws-sdk/client-bedrock"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
@@ -253,6 +254,24 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	private arnInfo: any
 	private readonly providerName = "Bedrock"
 
+	// Cross-region inference profile id allowlist, populated lazily via a single
+	// `ListInferenceProfilesCommand` call against the user's region. AWS only routes
+	// requests when a regional system inference profile (e.g. `us.moonshotai.kimi-k2.5`)
+	// has been published; brand-new foundation models often launch on-demand BEFORE the
+	// matching regional profile exists. Without this gate we'd unconditionally prepend
+	// the regional prefix and Bedrock would reject the call as
+	// "the provided model identifier is invalid".
+	//
+	// Lifecycle:
+	//   undefined -> lookup is pending or was never started; preserve legacy behavior
+	//                (apply the prefix as before) so we don't regress users today.
+	//   null      -> lookup failed (e.g. missing `bedrock:ListInferenceProfiles` IAM
+	//                permission, network error). Same fallback as `undefined`.
+	//   Set       -> AWS-confirmed regional profile ids; only apply the prefix when
+	//                the candidate id is in this set.
+	private crossRegionProfileIdsResolved: Set<string> | null | undefined = undefined
+	private crossRegionProfileIdsPromise?: Promise<Set<string> | null>
+
 	constructor(options: ProviderSettings) {
 		super()
 		this.options = options
@@ -335,6 +354,95 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		this.client = new BedrockRuntimeClient(clientConfig)
+
+		// Kick off (but don't await) discovery of which cross-region inference profile
+		// ids AWS has actually published in this region. The result gates the prefix
+		// in `getModel()` so brand-new foundation models that don't yet have a regional
+		// system profile (e.g. moonshotai.kimi-k2.5 in 2026) aren't rejected by Bedrock
+		// as "the provided model identifier is invalid". The lookup is fire-and-forget
+		// at construction time; createMessage() awaits the cached promise before the
+		// first invocation so the cache is populated by the time the prefix decision
+		// is made.
+		this.crossRegionProfileIdsPromise = this.loadCrossRegionInferenceProfileIds()
+			.then((ids) => {
+				this.crossRegionProfileIdsResolved = ids
+				// Force getModel() to recompute now that AWS-published ids are known.
+				// The constructor seeded `costModelConfig` while the cache was still
+				// `undefined`, so a buggy prefixed id may have been cached. Clearing
+				// `id` here makes the next getModel() call take the full path and
+				// re-derive the correct id under the new gating rules.
+				this.costModelConfig = { id: "", info: this.costModelConfig.info }
+				this.costModelConfig = this.getModel()
+				return ids
+			})
+			.catch((error) => {
+				// Silently fall back to legacy behavior (apply prefix unconditionally)
+				// when discovery fails. The most common cause is the IAM principal not
+				// being granted `bedrock:ListInferenceProfiles`; we don't want to break
+				// users whose existing setups work today just because we added a new
+				// API call.
+				this.crossRegionProfileIdsResolved = null
+				logger.info(
+					"Bedrock cross-region inference profile discovery failed; preserving legacy prefix behavior",
+					{
+						ctx: "bedrock",
+						errorMessage: error instanceof Error ? error.message : String(error),
+					},
+				)
+				return null
+			})
+	}
+
+	/**
+	 * Lazily fetch the set of cross-region (system) inference-profile ids that AWS has
+	 * published in the user's region, e.g. `us.anthropic.claude-...`, `us.moonshotai.kimi-k2.5`.
+	 * Used by `getModel()` to decide whether prepending the regional prefix to a foundation-model
+	 * id will route correctly. Returns `null` when discovery cannot be performed (no region,
+	 * cross-region toggle disabled, missing IAM permission, or network error) so the caller
+	 * can fall back to legacy unconditional-prefix behavior.
+	 */
+	private async loadCrossRegionInferenceProfileIds(): Promise<Set<string> | null> {
+		if (!this.options.awsRegion) {
+			return null
+		}
+		if (!this.options.awsUseCrossRegionInference) {
+			// No reason to call AWS if the user hasn't even toggled cross-region inference.
+			return null
+		}
+
+		const config: BedrockClientConfig = {
+			userAgentAppId: `RooCode#${Package.version}`,
+			region: this.options.awsRegion,
+		}
+		if (this.options.awsUseApiKey && this.options.awsApiKey) {
+			config.token = { token: this.options.awsApiKey }
+			config.authSchemePreference = ["httpBearerAuth"]
+		} else if (this.options.awsUseProfile && this.options.awsProfile) {
+			config.credentials = fromIni({
+				profile: this.options.awsProfile,
+				ignoreCache: true,
+			})
+		} else if (this.options.awsAccessKey && this.options.awsSecretKey) {
+			config.credentials = {
+				accessKeyId: this.options.awsAccessKey,
+				secretAccessKey: this.options.awsSecretKey,
+				...(this.options.awsSessionToken ? { sessionToken: this.options.awsSessionToken } : {}),
+			}
+		}
+
+		const controlClient = new BedrockClient(config)
+		const ids = new Set<string>()
+		let nextToken: string | undefined
+		do {
+			const response = await controlClient.send(new ListInferenceProfilesCommand({ nextToken, maxResults: 100 }))
+			for (const summary of response.inferenceProfileSummaries ?? []) {
+				if (summary.inferenceProfileId) {
+					ids.add(summary.inferenceProfileId)
+				}
+			}
+			nextToken = response.nextToken
+		} while (nextToken)
+		return ids
 	}
 
 	override async *createMessage(
@@ -348,6 +456,16 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 		},
 	): ApiStream {
+		// Wait for the cross-region inference profile discovery to settle before deriving
+		// modelConfig. Without this barrier, the very first invocation of a fresh handler
+		// would race the constructor's fire-and-forget lookup and could fall back to the
+		// legacy unconditional-prefix branch, which is exactly the bug we're trying to
+		// fix for newly-launched models that don't yet have a regional profile.
+		// Subsequent invocations are free - the promise is resolved and `await` is a no-op.
+		if (this.crossRegionProfileIdsPromise) {
+			await this.crossRegionProfileIdsPromise
+		}
+
 		const modelConfig = this.getModel()
 		const usePromptCache = Boolean(
 			(this.options.awsUsePromptCache ?? true) && this.supportsAwsPromptCache(modelConfig),
@@ -1237,11 +1355,26 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				) {
 					modelConfig.id = `global.${baseIdForGlobal}`
 				}
-				// Otherwise, add cross-region inference prefix if enabled
+				// Otherwise, add cross-region inference prefix if enabled.
+				// Gate on the AWS-confirmed regional profile id set so we don't unconditionally
+				// prepend a prefix that doesn't yet have a published system inference profile
+				// (e.g. brand-new foundation models like moonshotai.kimi-k2.5 in 2026 - AWS
+				// makes them invokable on-demand BEFORE the matching `us.<id>` profile exists,
+				// and prepending the prefix anyway yields "the provided model identifier is
+				// invalid"). When the discovery cache is unavailable (still loading, lookup
+				// failed, or no IAM permission) we preserve legacy behavior and apply the
+				// prefix as before so we don't regress users whose existing setups work today.
 				else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
 					const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
 					if (prefix) {
-						modelConfig.id = `${prefix}${modelConfig.id}`
+						const candidatePrefixedId = `${prefix}${modelConfig.id}`
+						const profiles = this.crossRegionProfileIdsResolved
+						if (profiles == null || profiles.has(candidatePrefixedId)) {
+							modelConfig.id = candidatePrefixedId
+						}
+						// else: AWS has NOT published this regional profile in the user's
+						// region. Leave the bare id alone; on-demand invocation against the
+						// foundation-model id is the correct routing in that case.
 					}
 				}
 			}
