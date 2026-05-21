@@ -3824,6 +3824,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const modelInfo = this.api.getModel().info
 
+			// Combine global custom instructions with per-profile instructions.
+			// Both are optional; either or both can contribute to the system prompt.
+			const combinedCustomInstructions =
+				[customInstructions, apiConfiguration?.customInstructions].filter(Boolean).join("\n\n") || undefined
+
 			return SYSTEM_PROMPT(
 				provider.context,
 				this.cwd,
@@ -3833,7 +3838,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode ?? defaultModeSlug,
 				customModePrompts,
 				customModes,
-				customInstructions,
+				combinedCustomInstructions,
 				experiments,
 				language,
 				rooIgnoreInstructions,

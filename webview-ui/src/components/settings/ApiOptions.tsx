@@ -895,6 +895,19 @@ const ApiOptions = ({
 					)}
 				</>
 			)}
+			<div>
+				<label className="block font-medium mb-1">{t("settings:providers.profileCustomInstructions")}</label>
+				<textarea
+					value={apiConfiguration?.customInstructions || ""}
+					onChange={(e) => setApiConfigurationField("customInstructions", e.target.value || undefined)}
+					placeholder={t("settings:providers.profileCustomInstructionsPlaceholder")}
+					className="w-full min-h-[80px] p-2 rounded border border-vscode-input-border bg-vscode-input-background text-vscode-input-foreground text-sm font-mono resize-y"
+					rows={4}
+				/>
+				<div className="text-sm text-vscode-descriptionForeground mt-1">
+					{t("settings:providers.profileCustomInstructionsDesc")}
+				</div>
+			</div>
 		</div>
 	)
 }

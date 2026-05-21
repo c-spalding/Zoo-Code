@@ -378,6 +378,9 @@
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API Key",
 		"getVercelAiGatewayApiKey": "Get Vercel AI Gateway API Key",
 		"apiKeyStorageNotice": "API keys are stored securely in VSCode's Secret Storage",
+		"profileCustomInstructions": "Profile Instructions",
+		"profileCustomInstructionsPlaceholder": "Custom instructions for this provider profile...",
+		"profileCustomInstructionsDesc": "These instructions are appended to the system prompt when this profile is active. Use them to influence model behavior per-profile (e.g., be more concise with cheaper models, or add specific constraints for a particular model).",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",
