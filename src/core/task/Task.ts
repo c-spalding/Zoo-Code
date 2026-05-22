@@ -3854,9 +3854,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const textToolCallFallback = fallbackModeState?.apiConfiguration?.textToolCallFallback ?? false
 
 						if (textToolCallFallback && !didToolUse) {
-							// Use cleanAssistantText when available (extractInlineThinking was on),
-							// otherwise fall back to the raw assistantMessage.
-							const textToScan = streamExtractInlineThinking ? cleanAssistantText : assistantMessage
+							// Always scan the raw assistantMessage. TextToolCallExtractor.extract()
+							// strips thinking tags internally before looking for tool calls, so
+							// there is no risk of executing tool patterns inside thinking blocks.
+							// Using cleanAssistantText was unreliable because partial-tag buffering
+							// could leave it incomplete at stream end.
+							const textToScan = assistantMessage
 
 							if (textToScan.length > 0) {
 								const { TextToolCallExtractor } = await import(
