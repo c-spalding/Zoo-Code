@@ -25,6 +25,9 @@ const THINKING_TAG_REGEX = /<(think|thinking|reasoning)>([\s\S]*?)<\/\1>/gi
 // Matches a fenced code block tagged as tool_call containing JSON
 const FENCED_TOOL_CALL_REGEX = /```tool_call\r?\n([\s\S]*?)```/gi
 
+// Matches Anthropic-style <invoke name="tool"><parameter name="k">v</parameter></invoke>
+const INVOKE_TOOL_CALL_REGEX = /<invoke\s+name="([^"]+)">([\s\S]*?)<\/invoke>/gi
+
 /**
  * Extracts tool calls (XML and JSON-in-fenced-code formats) and inline thinking
  * content from assistant text output.
@@ -73,10 +76,11 @@ export class TextToolCallExtractor {
 		let lastIndex = 0
 		const xmlMatches = TextToolCallExtractor.findXmlToolCalls(workingText, allowedSet)
 		const jsonMatches = TextToolCallExtractor.findJsonToolCalls(workingText, allowedSet)
+		const invokeMatches = TextToolCallExtractor.findInvokeToolCalls(workingText, allowedSet)
 
 		// Merge and sort all matches by their start position in the text.
 		// Where matches overlap (unlikely but possible), prefer the one that starts first.
-		const allMatches = [...xmlMatches, ...jsonMatches].sort((a, b) => a.start - b.start)
+		const allMatches = [...xmlMatches, ...jsonMatches, ...invokeMatches].sort((a, b) => a.start - b.start)
 
 		for (const match of allMatches) {
 			// Skip overlapping matches
@@ -188,6 +192,65 @@ export class TextToolCallExtractor {
 		const childPattern = /<([A-Za-z_][A-Za-z0-9_]*)>([\s\S]*?)<\/\1>/g
 		let child: RegExpExecArray | null
 		while ((child = childPattern.exec(innerXml)) !== null) {
+			entries.push([child[1], child[2].trim()])
+		}
+		return entries
+	}
+
+	/**
+	 * Find Anthropic-style invoke format tool calls, e.g.:
+	 *
+	 *   <invoke name="read_file">
+	 *     <parameter name="path">/src/main.ts</parameter>
+	 *   </invoke>
+	 */
+	private static findInvokeToolCalls(
+		text: string,
+		allowedSet: Set<ToolName>,
+	): Array<{ start: number; end: number; call: ExtractedToolCall }> {
+		const results: Array<{ start: number; end: number; call: ExtractedToolCall }> = []
+		const pattern = new RegExp(INVOKE_TOOL_CALL_REGEX.source, "gi")
+
+		let match: RegExpExecArray | null
+		while ((match = pattern.exec(text)) !== null) {
+			const toolName = match[1].toLowerCase()
+			const innerXml = match[2]
+			const rawText = match[0]
+
+			if (!TextToolCallExtractor.isAllowedTool(toolName, allowedSet)) {
+				continue
+			}
+
+			// Extract <parameter name="key">value</parameter> children
+			const paramEntries = TextToolCallExtractor.extractInvokeParams(innerXml)
+			const params = TextToolCallExtractor.buildParams(paramEntries)
+			if (!params) {
+				continue
+			}
+
+			results.push({
+				start: match.index,
+				end: match.index + rawText.length,
+				call: { name: toolName, params, rawText },
+			})
+		}
+
+		return results
+	}
+
+	/**
+	 * Extract parameter key/value pairs from the body of an <invoke> tool call.
+	 *
+	 * Example input:
+	 *   "\n  <parameter name=\"path\">/src/main.ts</parameter>\n"
+	 * Returns:
+	 *   [["path", "/src/main.ts"]]
+	 */
+	private static extractInvokeParams(innerXml: string): Array<[string, string]> {
+		const entries: Array<[string, string]> = []
+		const paramPattern = /<parameter\s+name="([^"]+)">([\s\S]*?)<\/parameter>/g
+		let child: RegExpExecArray | null
+		while ((child = paramPattern.exec(innerXml)) !== null) {
 			entries.push([child[1], child[2].trim()])
 		}
 		return entries

@@ -4023,6 +4023,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						.get<boolean>("newTaskRequireTodos", false),
 					isStealthModel: modelInfo?.isStealthModel,
 					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
+					textToolCallFallback: apiConfiguration?.textToolCallFallback,
 				},
 				undefined, // todoList
 				this.api.getModel().id,

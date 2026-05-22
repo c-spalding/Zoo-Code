@@ -86,7 +86,7 @@ async function generatePrompt(
 
 ${markdownFormattingSection()}
 
-${getSharedToolUseSection(settings?.allowTextOnlyResponses)}${toolsCatalog}
+${getSharedToolUseSection(settings?.allowTextOnlyResponses, settings?.textToolCallFallback)}${toolsCatalog}
 
 	${getToolUseGuidelinesSection()}
 
