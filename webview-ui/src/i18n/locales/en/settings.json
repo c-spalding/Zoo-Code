@@ -844,6 +844,10 @@
 		"allowTextOnlyResponses": {
 			"label": "Allow text-only responses",
 			"description": "When enabled, models can respond with text alone without being forced to call a tool. Useful for open-weight models that prefer to explain before acting."
+		},
+		"textToolCallFallback": {
+			"label": "Extract tool calls from text",
+			"description": "When models emit tool calls as XML or JSON in their text output (common with open-weight models via Bedrock), attempt to extract and execute them. Inline thinking tags are rendered as collapsible reasoning blocks."
 		}
 	},
 	"experimental": {

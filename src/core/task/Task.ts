@@ -3697,9 +3697,79 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// If the model did not tool use, then we need to tell it to
 					// either use a tool or attempt_completion.
-					const didToolUse = this.assistantMessageContent.some(
+					let didToolUse = this.assistantMessageContent.some(
 						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
 					)
+
+					// --- Text-to-Tool Fallback ---
+					// If no native tool calls were found and textToolCallFallback is enabled,
+					// attempt to extract tool calls from the assistant's text content.
+					// Also extracts inline thinking tags and renders them as reasoning blocks.
+					if (!didToolUse) {
+						const fallbackState = await this.providerRef.deref()?.getState()
+						const textToolCallFallback = fallbackState?.apiConfiguration?.textToolCallFallback ?? false
+
+						if (textToolCallFallback) {
+							// Gather all text content from the assistant message
+							const textBlocks = this.assistantMessageContent
+								.filter(
+									(block): block is import("../../shared/tools").TextContent => block.type === "text",
+								)
+								.map((block) => block.content)
+								.join("\n")
+
+							if (textBlocks.length > 0) {
+								const { TextToolCallExtractor } = await import(
+									"../assistant-message/TextToolCallExtractor"
+								)
+
+								// Determine allowed tools for the current mode
+								const fallbackProvider = this.providerRef.deref()
+								const fallbackModeState = fallbackProvider
+									? await fallbackProvider.getState()
+									: undefined
+								const modeSlug =
+									fallbackModeState?.mode ?? (await import("../../shared/modes")).defaultModeSlug
+								const customModes = fallbackModeState?.customModes ?? []
+								const experiments = fallbackModeState?.experiments ?? {}
+								const settings = {
+									todoListEnabled: fallbackModeState?.apiConfiguration?.todoListEnabled ?? true,
+								}
+								const { isToolAllowedInMode } = await import("../prompts/tools/filter-tools-for-mode")
+								const { toolNames } = await import("@roo-code/types")
+								const allowedTools = toolNames.filter((name) =>
+									isToolAllowedInMode(name, modeSlug, customModes, experiments, undefined, settings),
+								)
+
+								const extracted = TextToolCallExtractor.extract(textBlocks, allowedTools)
+
+								// If thinking content was found, emit it as a reasoning block
+								if (extracted.thinking) {
+									await this.say("reasoning", extracted.thinking)
+								}
+
+								if (extracted.toolCalls.length > 0) {
+									// Convert extracted calls to ToolUse blocks with synthetic IDs
+									for (const call of extracted.toolCalls) {
+										const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
+										const toolUseBlock: import("../../shared/tools").ToolUse = {
+											type: "tool_use",
+											name: call.name,
+											params: call.params as Partial<
+												Record<import("../../shared/tools").ToolParamName, string>
+											>,
+											partial: false,
+											id: syntheticId,
+										}
+										this.assistantMessageContent.push(toolUseBlock)
+									}
+									didToolUse = true
+									// Re-present the message with the new tool blocks
+									presentAssistantMessage(this)
+								}
+							}
+						}
+					}
 
 					if (!didToolUse) {
 						// Fetch the latest provider settings to check the allowTextOnlyResponses flag.

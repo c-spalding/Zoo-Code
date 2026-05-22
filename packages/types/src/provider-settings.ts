@@ -205,6 +205,12 @@ const baseProviderSettingsSchema = z.object({
 	// tool-use retry. The response is presented as a followup ask so the user (or
 	// the auto-approval timeout) can provide the next instruction. Default: false.
 	allowTextOnlyResponses: z.boolean().optional(),
+
+	// When true, if the model responds with text only (no native tool calls), the
+	// system will attempt to extract tool calls from XML markup or JSON-in-fenced-code
+	// blocks in the text. Also extracts inline thinking tags and renders them as
+	// collapsible reasoning blocks. Useful for open-weight models via Bedrock.
+	textToolCallFallback: z.boolean().optional(),
 })
 
 // Several of the providers share common model config properties.

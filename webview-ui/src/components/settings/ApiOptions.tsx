@@ -810,6 +810,22 @@ const ApiOptions = ({
 										</div>
 									</div>
 								</div>
+								<div className="flex flex-col gap-1">
+									<div>
+										<VSCodeCheckbox
+											checked={apiConfiguration.textToolCallFallback ?? false}
+											onChange={(e: any) =>
+												setApiConfigurationField("textToolCallFallback", e.target.checked)
+											}>
+											<span className="font-medium">
+												{t("settings:advanced.textToolCallFallback.label")}
+											</span>
+										</VSCodeCheckbox>
+										<div className="text-vscode-descriptionForeground text-sm">
+											{t("settings:advanced.textToolCallFallback.description")}
+										</div>
+									</div>
+								</div>
 								{selectedProvider === "poe" && (
 									<VSCodeTextField
 										value={apiConfiguration?.poeBaseUrl || ""}
