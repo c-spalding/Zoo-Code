@@ -2869,6 +2869,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let assistantMessage = ""
 				let reasoningMessage = ""
 				let pendingGroundingSources: GroundingSource[] = []
+
+				// Read extractInlineThinking setting once before the stream starts
+				// so the hot-path text handler can use it without async reads per chunk.
+				const preStreamProviderState = await this.providerRef.deref()?.getState()
+				const streamExtractInlineThinking =
+					preStreamProviderState?.apiConfiguration?.extractInlineThinking ?? false
+
+				// State for the streaming inline-thinking parser.
+				// When streamExtractInlineThinking is true, the case "text" handler feeds
+				// incoming chunks through this state machine and routes thinking tag content
+				// to a reasoning block while keeping the text block clean.
+				let ilThinkInTag = false // currently inside <think>/<thinking>/<reasoning>
+				let ilThinkTagName = "" // the tag name we're inside
+				let ilThinkContent = "" // content accumulated inside the current tag
+				let ilThinkPending = "" // trailing chars that might start a tag (buffered)
+				let cleanAssistantText = "" // assistantMessage with thinking tags removed (for display)
+
 				this.isStreaming = true
 
 				try {
@@ -3094,20 +3111,124 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							case "text": {
 								assistantMessage += chunk.text
 
-								// Native tool calling: text chunks are plain text.
-								// Create or update a text content block directly
-								const lastBlock = this.assistantMessageContent[this.assistantMessageContent.length - 1]
-								if (lastBlock?.type === "text" && lastBlock.partial) {
-									lastBlock.content = assistantMessage
+								if (!streamExtractInlineThinking) {
+									// Normal path: no inline-thinking extraction.
+									const lastBlock =
+										this.assistantMessageContent[this.assistantMessageContent.length - 1]
+									if (lastBlock?.type === "text" && lastBlock.partial) {
+										lastBlock.content = assistantMessage
+									} else {
+										this.assistantMessageContent.push({
+											type: "text",
+											content: assistantMessage,
+											partial: true,
+										})
+										this.userMessageContentReady = false
+									}
+									presentAssistantMessage(this)
 								} else {
-									this.assistantMessageContent.push({
-										type: "text",
-										content: assistantMessage,
-										partial: true,
-									})
-									this.userMessageContentReady = false
+									// Inline-thinking extraction path.
+									// Feed the new chunk (prepended with any previously buffered
+									// partial-tag text) through a state machine that routes content
+									// either to a streaming reasoning block or to the text block.
+									let remaining = ilThinkPending + chunk.text
+									ilThinkPending = ""
+
+									while (remaining.length > 0) {
+										if (!ilThinkInTag) {
+											// --- TEXT mode: scan for an opening thinking tag ---
+											const openMatch = remaining.match(/<(think|thinking|reasoning)>/i)
+											if (openMatch && openMatch.index !== undefined) {
+												// Text before the opening tag goes to the text block
+												const textPart = remaining.slice(0, openMatch.index)
+												if (textPart) {
+													cleanAssistantText += textPart
+													const lb =
+														this.assistantMessageContent[
+															this.assistantMessageContent.length - 1
+														]
+													if (lb?.type === "text" && lb.partial) {
+														lb.content = cleanAssistantText
+													} else {
+														this.assistantMessageContent.push({
+															type: "text",
+															content: cleanAssistantText,
+															partial: true,
+														})
+														this.userMessageContentReady = false
+													}
+													presentAssistantMessage(this)
+												}
+												// Switch to tag mode
+												ilThinkInTag = true
+												ilThinkTagName = openMatch[1].toLowerCase()
+												ilThinkContent = ""
+												remaining = remaining.slice(openMatch.index + openMatch[0].length)
+											} else {
+												// No complete opening tag found.
+												// Buffer any trailing `<` that could be the start of a tag.
+												const ltIdx = remaining.lastIndexOf("<")
+												let safeText: string
+												if (ltIdx !== -1 && ltIdx > remaining.length - 15) {
+													// Potential partial tag at end - buffer it
+													safeText = remaining.slice(0, ltIdx)
+													ilThinkPending = remaining.slice(ltIdx)
+												} else {
+													safeText = remaining
+												}
+												remaining = ""
+												if (safeText) {
+													cleanAssistantText += safeText
+													const lb =
+														this.assistantMessageContent[
+															this.assistantMessageContent.length - 1
+														]
+													if (lb?.type === "text" && lb.partial) {
+														lb.content = cleanAssistantText
+													} else {
+														this.assistantMessageContent.push({
+															type: "text",
+															content: cleanAssistantText,
+															partial: true,
+														})
+														this.userMessageContentReady = false
+													}
+													presentAssistantMessage(this)
+												}
+											}
+										} else {
+											// --- THINKING mode: scan for the closing tag ---
+											const closeTag = `</${ilThinkTagName}>`
+											const closeIdx = remaining.toLowerCase().indexOf(closeTag)
+											if (closeIdx !== -1) {
+												// Content before closing tag
+												ilThinkContent += remaining.slice(0, closeIdx)
+												// Finalize this reasoning block and stream it
+												await this.say("reasoning", ilThinkContent.trim(), undefined, true)
+												ilThinkInTag = false
+												ilThinkTagName = ""
+												remaining = remaining.slice(closeIdx + closeTag.length)
+												ilThinkContent = ""
+											} else {
+												// Still inside tag - check for partial closing tag at end
+												const ltIdx = remaining.lastIndexOf("<")
+												let safeContent: string
+												if (ltIdx !== -1 && ltIdx > remaining.length - (closeTag.length + 1)) {
+													safeContent = remaining.slice(0, ltIdx)
+													ilThinkPending = remaining.slice(ltIdx)
+												} else {
+													safeContent = remaining
+												}
+												remaining = ""
+												if (safeContent) {
+													ilThinkContent += safeContent
+													// Stream partial reasoning content
+													await this.say("reasoning", ilThinkContent, undefined, true)
+												}
+											}
+										}
+									}
 								}
-								presentAssistantMessage(this)
 								break
 							}
 						}
@@ -3493,15 +3614,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// to ensure usage data is captured even when the stream is interrupted. The background task
 				// uses local variables to accumulate usage data before atomically updating the shared state.
 
-				// Complete the reasoning message if it exists
-				// We can't use say() here because the reasoning message may not be the last message
-				// (other messages like text blocks or tool uses may have been added after it during streaming)
-				if (reasoningMessage) {
+				// Finalize any unclosed inline thinking tag left open at stream end.
+				// This handles the edge case where the model's output was cut off mid-tag.
+				if (streamExtractInlineThinking && ilThinkInTag && ilThinkContent) {
+					// Flush buffered pending text as thinking content
+					ilThinkContent += ilThinkPending
+					ilThinkPending = ""
+					await this.say("reasoning", ilThinkContent.trim(), undefined, false)
+					ilThinkInTag = false
+					ilThinkContent = ""
+				} else if (streamExtractInlineThinking && ilThinkPending) {
+					// Buffered text that turned out not to be a tag - add to clean text
+					cleanAssistantText += ilThinkPending
+					ilThinkPending = ""
+					const lb = this.assistantMessageContent[this.assistantMessageContent.length - 1]
+					if (lb?.type === "text" && lb.partial) {
+						lb.content = cleanAssistantText
+					}
+				}
+
+				// Complete any partial reasoning message (native or inline-thinking).
+				// We can't use say() here because the reasoning message may not be the last
+				// message - other blocks may have been streamed after it.
+				{
 					const lastReasoningIndex = findLastIndex(
 						this.clineMessages,
 						(m) => m.type === "say" && m.say === "reasoning",
 					)
-
 					if (lastReasoningIndex !== -1 && this.clineMessages[lastReasoningIndex].partial) {
 						this.clineMessages[lastReasoningIndex].partial = false
 						await this.updateClineMessage(this.clineMessages[lastReasoningIndex])
@@ -3701,32 +3840,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
 					)
 
-					// --- Inline Thinking Extraction + Text-to-Tool Fallback ---
-					// When extractInlineThinking is enabled, scan text blocks for inline
-					// thinking tags (<think>, <thinking>, <reasoning>) and emit them as
-					// collapsible reasoning blocks. The raw text blocks are updated to
-					// remove the extracted tags so the user does not see duplicated content.
-					// When textToolCallFallback is also enabled and no native tool calls were
-					// found, additionally attempt to extract XML/JSON tool calls from the text.
+					// --- Text-to-Tool Fallback ---
+					// Inline thinking extraction is now handled during streaming (case "text"
+					// handler above).  This post-stream block only handles XML/JSON tool call
+					// extraction when textToolCallFallback is enabled and no native tool calls
+					// were detected.
+					// We scan cleanAssistantText (thinking tags already stripped) rather than
+					// the raw assistantMessage so tool-call patterns inside thinking blocks
+					// are not mistakenly executed.
 					{
-						// Gather all text content from the assistant message
-						const textBlocks = this.assistantMessageContent
-							.filter((block): block is import("../../shared/tools").TextContent => block.type === "text")
-							.map((block) => block.content)
-							.join("\n")
+						const fallbackProvider = this.providerRef.deref()
+						const fallbackModeState = fallbackProvider ? await fallbackProvider.getState() : undefined
+						const textToolCallFallback = fallbackModeState?.apiConfiguration?.textToolCallFallback ?? false
 
-						if (textBlocks.length > 0) {
-							const { TextToolCallExtractor } = await import("../assistant-message/TextToolCallExtractor")
+						if (textToolCallFallback && !didToolUse) {
+							// Use cleanAssistantText when available (extractInlineThinking was on),
+							// otherwise fall back to the raw assistantMessage.
+							const textToScan = streamExtractInlineThinking ? cleanAssistantText : assistantMessage
 
-							const fallbackProvider = this.providerRef.deref()
-							const fallbackModeState = fallbackProvider ? await fallbackProvider.getState() : undefined
-							const textToolCallFallback =
-								fallbackModeState?.apiConfiguration?.textToolCallFallback ?? false
-							const extractInlineThinking =
-								fallbackModeState?.apiConfiguration?.extractInlineThinking ?? false
-
-							// Only proceed if at least one of the features is enabled
-							if (extractInlineThinking || textToolCallFallback) {
+							if (textToScan.length > 0) {
+								const { TextToolCallExtractor } = await import(
+									"../assistant-message/TextToolCallExtractor"
+								)
 								const modeSlug =
 									fallbackModeState?.mode ?? (await import("../../shared/modes")).defaultModeSlug
 								const customModes = fallbackModeState?.customModes ?? []
@@ -3736,61 +3871,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								}
 								const { isToolAllowedInMode } = await import("../prompts/tools/filter-tools-for-mode")
 								const { toolNames } = await import("@roo-code/types")
-								const allowedTools = textToolCallFallback
-									? toolNames.filter((name) =>
-											isToolAllowedInMode(
-												name,
-												modeSlug,
-												customModes,
-												experiments,
-												undefined,
-												settings,
-											),
-										)
-									: [] // When only extracting thinking, pass empty list (no tool extraction)
+								const allowedTools = toolNames.filter((name) =>
+									isToolAllowedInMode(name, modeSlug, customModes, experiments, undefined, settings),
+								)
 
-								const extracted = TextToolCallExtractor.extract(textBlocks, allowedTools)
+								const extracted = TextToolCallExtractor.extract(textToScan, allowedTools)
 
-								// When thinking was found and extraction is enabled, clean the raw
-								// text blocks by removing the thinking tags so they are not shown
-								// twice (once as raw XML in the text stream and once as a rendered
-								// reasoning block).  We do this BEFORE emitting the reasoning say
-								// so the reasoning block precedes the cleaned text in the message
-								// history from the user's perspective.
-								if (extractInlineThinking && extracted.thinking) {
-									// Replace each text block's content with the cleaned version
-									// (thinking tags removed).  The extractor already built
-									// cleanedText which is the joined result; we must distribute
-									// the removals back to the individual blocks.
-									for (const block of this.assistantMessageContent) {
-										if (block.type === "text") {
-											const textBlock = block as import("../../shared/tools").TextContent
-											textBlock.content = TextToolCallExtractor.removeThinkingTags(
-												textBlock.content,
-											)
-										}
-									}
-
-									// Update the last saved text message (if any) so the webview
-									// reflects the cleaned content.
-									const lastTextMsgIdx = findLastIndex(
-										this.clineMessages,
-										(m) => m.type === "say" && m.say === "text",
-									)
-									if (lastTextMsgIdx !== -1) {
-										const msg = this.clineMessages[lastTextMsgIdx]
-										if (msg.text) {
-											msg.text = TextToolCallExtractor.removeThinkingTags(msg.text)
-											await this.updateClineMessage(msg)
-										}
-									}
-
-									await this.say("reasoning", extracted.thinking)
-								}
-
-								// Only inject extracted tool calls when the fallback is enabled
-								// and no native tool calls were already found.
-								if (!didToolUse && textToolCallFallback && extracted.toolCalls.length > 0) {
+								if (extracted.toolCalls.length > 0) {
 									// Convert extracted calls to ToolUse blocks with synthetic IDs
 									for (const call of extracted.toolCalls) {
 										const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
