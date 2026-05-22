@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import { convertHeadersToObject } from "./utils/headers"
 import { useDebounce } from "react-use"
-import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { ExternalLinkIcon } from "@radix-ui/react-icons"
 
 import {
@@ -794,6 +794,22 @@ const ApiOptions = ({
 									}
 									onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
 								/>
+								<div className="flex flex-col gap-1">
+									<div>
+										<VSCodeCheckbox
+											checked={apiConfiguration.allowTextOnlyResponses ?? false}
+											onChange={(e: any) =>
+												setApiConfigurationField("allowTextOnlyResponses", e.target.checked)
+											}>
+											<span className="font-medium">
+												{t("settings:advanced.allowTextOnlyResponses.label")}
+											</span>
+										</VSCodeCheckbox>
+										<div className="text-vscode-descriptionForeground text-sm">
+											{t("settings:advanced.allowTextOnlyResponses.description")}
+										</div>
+									</div>
+								</div>
 								{selectedProvider === "poe" && (
 									<VSCodeTextField
 										value={apiConfiguration?.poeBaseUrl || ""}

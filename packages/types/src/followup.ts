@@ -10,6 +10,12 @@ export interface FollowUpData {
 	question?: string
 	/** Array of suggested answers that the user can select */
 	suggest?: Array<SuggestionItem>
+	/**
+	 * When true the followup ask is invisible - no UI is rendered.
+	 * Used internally when allowTextOnlyResponses pauses the loop to wait
+	 * for the followupAutoApproveTimeout before sending the soft-nudge.
+	 */
+	silent?: boolean
 }
 
 /**
@@ -36,6 +42,7 @@ export const suggestionItemSchema = z.object({
 export const followUpDataSchema = z.object({
 	question: z.string().optional(),
 	suggest: z.array(suggestionItemSchema).optional(),
+	silent: z.boolean().optional(),
 })
 
 export type FollowUpDataType = z.infer<typeof followUpDataSchema>

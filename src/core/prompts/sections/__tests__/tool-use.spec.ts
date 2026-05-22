@@ -28,4 +28,48 @@ describe("getSharedToolUseSection", () => {
 		expect(section).not.toContain("<actual_tool_name>")
 		expect(section).not.toContain("</actual_tool_name>")
 	})
+
+	describe("allowTextOnlyResponses flag", () => {
+		it("when true: should NOT contain the mandatory tool-call requirement", () => {
+			const section = getSharedToolUseSection(true)
+
+			expect(section).not.toContain("You must call at least one tool per assistant response")
+		})
+
+		it("when true: should contain permission to respond with text alone", () => {
+			const section = getSharedToolUseSection(true)
+
+			expect(section).toContain("you may respond with text alone")
+		})
+
+		it("when true: should still encourage tool use for progress", () => {
+			const section = getSharedToolUseSection(true)
+
+			expect(section).toContain("Use tools when you need to take action")
+		})
+
+		it("when false: should contain the mandatory tool-call requirement", () => {
+			const section = getSharedToolUseSection(false)
+
+			expect(section).toContain("You must call at least one tool per assistant response")
+		})
+
+		it("when false: should NOT contain permission to respond with text alone", () => {
+			const section = getSharedToolUseSection(false)
+
+			expect(section).not.toContain("you may respond with text alone")
+		})
+
+		it("when undefined (default): should contain the mandatory tool-call requirement", () => {
+			const section = getSharedToolUseSection(undefined)
+
+			expect(section).toContain("You must call at least one tool per assistant response")
+		})
+
+		it("when undefined (default): should NOT contain permission to respond with text alone", () => {
+			const section = getSharedToolUseSection(undefined)
+
+			expect(section).not.toContain("you may respond with text alone")
+		})
+	})
 })

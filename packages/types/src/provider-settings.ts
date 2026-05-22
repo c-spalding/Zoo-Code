@@ -200,6 +200,11 @@ const baseProviderSettingsSchema = z.object({
 
 	// Model verbosity.
 	verbosity: verbosityLevelsSchema.optional(),
+
+	// When true, text-only responses from the model are accepted without forcing a
+	// tool-use retry. The response is presented as a followup ask so the user (or
+	// the auto-approval timeout) can provide the next instruction. Default: false.
+	allowTextOnlyResponses: z.boolean().optional(),
 })
 
 // Several of the providers share common model config properties.

@@ -2503,7 +2503,79 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// the user hits max requests and denies resetting the count.
 				break
 			} else {
-				nextUserContent = [{ type: "text", text: formatResponse.noToolsUsed() }]
+				const loopState = await this.providerRef.deref()?.getState()
+				const allowTextOnly = loopState?.apiConfiguration?.allowTextOnlyResponses ?? false
+
+				if (!allowTextOnly) {
+					// Default behaviour: tell the model to use a tool or attempt_completion.
+					nextUserContent = [{ type: "text", text: formatResponse.noToolsUsed() }]
+					continue
+				}
+
+				// allowTextOnlyResponses is true - the model gave a text-only response.
+				// The text was already streamed to the UI; do not display it again.
+				// Issue a silent followup ask to pause the loop.  We must use ask()
+				// in both modes so that the user's reply is captured via the normal
+				// ask/response path and saved to the conversation history.
+				//
+				// - Non-auto-approve: suggest is empty, so FollowUpSuggest renders
+				//   nothing and no timer starts.  The loop simply waits for the user
+				//   to type their next message in the chat input.
+				// - Auto-approve: suggest[0] carries the soft-nudge text; checkAutoApproval
+				//   fires after followupAutoApproveTimeoutMs and sends it as the response.
+				const suggestions = loopState?.autoApprovalEnabled ? [{ answer: formatResponse.softNudge() }] : []
+
+				const silentPayload = JSON.stringify({
+					question: "",
+					silent: true,
+					suggest: suggestions,
+				})
+
+				const {
+					response,
+					text: responseText,
+					images: responseImages,
+				} = await this.ask("followup", silentPayload)
+
+				if (response === "messageResponse" && responseText) {
+					const softNudgeText = formatResponse.softNudge()
+					const isTimerFired = responseText === softNudgeText
+
+					if (isTimerFired) {
+						// The auto-approve timer fired.  Do NOT reset consecutiveNoToolUseCount
+						// here - we want it to accumulate across nudge cycles so that repeated
+						// text-only responses eventually cause consecutiveMistakeCount to reach
+						// the limit (see recursivelyMakeClineRequests allowTextOnly branch).
+					} else {
+						// User typed a reply - persist it as a "You said" bubble.
+						await this.say("user_feedback", responseText, responseImages)
+						// User actively intervened - reset counters so their message starts
+						// a fresh window for mistake-limit tracking.
+						this.consecutiveNoToolUseCount = 0
+						this.consecutiveMistakeCount = 0
+					}
+
+					nextUserContent = [{ type: "text", text: responseText }]
+
+					if (responseImages && responseImages.length > 0) {
+						nextUserContent.push(
+							...responseImages.map(
+								(image) =>
+									({
+										type: "image",
+										source: {
+											type: "base64",
+											media_type: image.startsWith("data:image/png") ? "image/png" : "image/jpeg",
+											data: image.split(",")[1],
+										},
+									}) as Anthropic.Messages.ImageBlockParam,
+							),
+						)
+					}
+				} else {
+					// User dismissed / yesButtonClicked / noButtonClicked / task aborted.
+					break
+				}
 			}
 		}
 	}
@@ -3630,21 +3702,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 
 					if (!didToolUse) {
-						// Increment consecutive no-tool-use counter
-						this.consecutiveNoToolUseCount++
+						// Fetch the latest provider settings to check the allowTextOnlyResponses flag.
+						// We re-read state here (not cached) so the user can toggle it mid-session.
+						const currentState = await this.providerRef.deref()?.getState()
+						const allowTextOnly = currentState?.apiConfiguration?.allowTextOnlyResponses ?? false
 
-						// Only show error and count toward mistake limit after 2 consecutive failures
-						if (this.consecutiveNoToolUseCount >= 2) {
-							await this.say("error", "MODEL_NO_TOOLS_USED")
-							// Only count toward mistake limit after second consecutive failure
-							this.consecutiveMistakeCount++
+						if (allowTextOnly) {
+							// Increment counter to track frequency of text-only turns.
+							this.consecutiveNoToolUseCount++
+
+							// After 2 consecutive text-only turns, count toward the mistake limit.
+							// We do NOT show "MODEL_NO_TOOLS_USED" because text-only responses are
+							// expected in this mode, but we still need to enforce a ceiling to
+							// prevent infinite nudge loops when the model is stuck.
+							if (this.consecutiveNoToolUseCount >= 2) {
+								this.consecutiveMistakeCount++
+							}
+
+							// The model's text is already displayed via the normal streaming path.
+							// Do NOT push any userMessageContent here - leave it empty so the
+							// inner stack loop exits and control returns to initiateTaskLoop.
+							// initiateTaskLoop is responsible for the pause/nudge behaviour:
+							//   - non-auto-approve: issues a silent followup ask and waits for user
+							//   - auto-approve: issues a silent followup ask that fires after
+							//     followupAutoApproveTimeoutMs and sends the soft-nudge text
+						} else {
+							// Default behaviour: treat the missing tool call as an error and
+							// force a retry using the standard noToolsUsed message.
+
+							// Increment consecutive no-tool-use counter
+							this.consecutiveNoToolUseCount++
+
+							// Only show error and count toward mistake limit after 2 consecutive failures
+							if (this.consecutiveNoToolUseCount >= 2) {
+								await this.say("error", "MODEL_NO_TOOLS_USED")
+								// Only count toward mistake limit after second consecutive failure
+								this.consecutiveMistakeCount++
+							}
+
+							// Use the task's locked protocol for consistent behavior
+							this.userMessageContent.push({
+								type: "text",
+								text: formatResponse.noToolsUsed(),
+							})
 						}
-
-						// Use the task's locked protocol for consistent behavior
-						this.userMessageContent.push({
-							type: "text",
-							text: formatResponse.noToolsUsed(),
-						})
 					} else {
 						// Reset counter when tools are used successfully
 						this.consecutiveNoToolUseCount = 0
@@ -3851,6 +3952,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						.getConfiguration(Package.name)
 						.get<boolean>("newTaskRequireTodos", false),
 					isStealthModel: modelInfo?.isStealthModel,
+					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 				},
 				undefined, // todoList
 				this.api.getModel().id,

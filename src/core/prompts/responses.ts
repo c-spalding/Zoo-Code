@@ -54,6 +54,14 @@ Otherwise, if you have not completed the task and do not need additional informa
 (This is an automated message, so do not respond to it conversationally.)`
 	},
 
+	// Sent as the auto-response when allowTextOnlyResponses is enabled and the
+	// followupAutoApproveTimeoutMs timer fires before the user responds.
+	// Framed as guidance rather than an error so the model does not spiral.
+	softNudge: () =>
+		`The user is not currently available to respond. Please proceed with the next step of the task using the appropriate tools, or call attempt_completion if you believe the task is finished.
+
+This is an automated message, so do not respond to it conversationally.`,
+
 	tooManyMistakes: (feedback?: string) =>
 		JSON.stringify({
 			status: "guidance",
