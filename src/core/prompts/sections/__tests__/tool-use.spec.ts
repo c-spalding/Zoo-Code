@@ -1,11 +1,11 @@
 import { getSharedToolUseSection } from "../tool-use"
 
 describe("getSharedToolUseSection", () => {
-	it("should include native tool-calling instructions", () => {
+	it("should include native tool-calling preference", () => {
 		const section = getSharedToolUseSection()
 
-		expect(section).toContain("provider-native tool-calling mechanism")
-		expect(section).toContain("Do not include XML markup or examples")
+		expect(section).toContain("Prefer the provider-native tool-calling mechanism when available")
+		expect(section).toContain("Do not include XML markup when using native tool-calling")
 	})
 
 	it("should include multiple tools per message guidance", () => {
@@ -22,11 +22,11 @@ describe("getSharedToolUseSection", () => {
 		expect(section).not.toContain("Do not call zero tools or more than one tool")
 	})
 
-	it("should NOT include XML formatting instructions", () => {
+	it("should NOT include XML fallback instructions by default", () => {
 		const section = getSharedToolUseSection()
 
-		expect(section).not.toContain("<actual_tool_name>")
-		expect(section).not.toContain("</actual_tool_name>")
+		expect(section).not.toContain("<tool_name>")
+		expect(section).not.toContain("embed tool calls directly in your text response")
 	})
 
 	describe("allowTextOnlyResponses flag", () => {
@@ -70,6 +70,49 @@ describe("getSharedToolUseSection", () => {
 			const section = getSharedToolUseSection(undefined)
 
 			expect(section).not.toContain("you may respond with text alone")
+		})
+	})
+
+	describe("textToolCallFallback flag", () => {
+		it("when true: should include XML fallback format instructions", () => {
+			const section = getSharedToolUseSection(undefined, true)
+
+			expect(section).toContain("embed tool calls directly in your text response")
+			expect(section).toContain("<tool_name>")
+			expect(section).toContain("<parameter_name>value</parameter_name>")
+		})
+
+		it("when true: should still prefer native tool-calling", () => {
+			const section = getSharedToolUseSection(undefined, true)
+
+			expect(section).toContain("Prefer the provider-native tool-calling mechanism when available")
+		})
+
+		it("when true: should mention thinking tag support", () => {
+			const section = getSharedToolUseSection(undefined, true)
+
+			expect(section).toContain("<thinking>")
+		})
+
+		it("when false: should NOT include XML fallback format instructions", () => {
+			const section = getSharedToolUseSection(undefined, false)
+
+			expect(section).not.toContain("embed tool calls directly in your text response")
+			expect(section).not.toContain("<tool_name>")
+		})
+
+		it("when undefined (default): should NOT include XML fallback format instructions", () => {
+			const section = getSharedToolUseSection(undefined, undefined)
+
+			expect(section).not.toContain("embed tool calls directly in your text response")
+			expect(section).not.toContain("<tool_name>")
+		})
+
+		it("when true with allowTextOnlyResponses: both flags apply independently", () => {
+			const section = getSharedToolUseSection(true, true)
+
+			expect(section).toContain("you may respond with text alone")
+			expect(section).toContain("embed tool calls directly in your text response")
 		})
 	})
 })
