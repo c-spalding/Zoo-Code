@@ -74,7 +74,7 @@ import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
-import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
+import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames, type TextContent } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
 // services
@@ -3881,23 +3881,93 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								const extracted = TextToolCallExtractor.extract(textToScan, allowedTools)
 
 								if (extracted.toolCalls.length > 0) {
-									// Convert extracted calls to ToolUse blocks with synthetic IDs
+									// Convert extracted calls to properly-typed ToolUse blocks.
+									// We must use NativeToolCallParser.parseToolCall() to build
+									// nativeArgs - presentAssistantMessage rejects known tools
+									// that have params but no nativeArgs.
+									const { NativeToolCallParser } = await import(
+										"../assistant-message/NativeToolCallParser"
+									)
+
+									// The assistant message was already saved to API history
+									// before fallback extraction ran (line ~3690 above).
+									// We must patch that history entry to include the synthetic
+									// tool_use blocks, otherwise the next turn will have
+									// tool_result blocks with no matching tool_use, causing
+									// API errors ("toolResult exceeds toolUse").
+									const lastHistoryMsg =
+										this.apiConversationHistory[this.apiConversationHistory.length - 1]
+									const historyToolUseBlocks: Anthropic.ToolUseBlockParam[] = []
+
 									for (const call of extracted.toolCalls) {
 										const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
-										const toolUseBlock: import("../../shared/tools").ToolUse = {
-											type: "tool_use",
-											name: call.name,
-											params: call.params as Partial<
-												Record<import("../../shared/tools").ToolParamName, string>
-											>,
-											partial: false,
+
+										// Use NativeToolCallParser to get properly typed nativeArgs
+										const parsed = NativeToolCallParser.parseToolCall({
 											id: syntheticId,
+											name: call.name,
+											arguments: JSON.stringify(call.params),
+										})
+
+										if (!parsed) {
+											console.warn(
+												`[TextToolFallback] Could not parse extracted tool call '${call.name}' - skipping`,
+											)
+											continue
 										}
-										this.assistantMessageContent.push(toolUseBlock)
+
+										parsed.id = syntheticId
+										this.assistantMessageContent.push(parsed)
+
+										// Build the tool_use block for API history patching
+										historyToolUseBlocks.push({
+											type: "tool_use" as const,
+											id: sanitizeToolUseId(syntheticId),
+											name: call.name,
+											input: call.params,
+										})
 									}
-									didToolUse = true
-									// Re-present the message with the new tool blocks
-									presentAssistantMessage(this)
+
+									if (historyToolUseBlocks.length > 0) {
+										// Patch the assistant message in API history to include
+										// the synthetic tool_use blocks so tool_result blocks
+										// on the next turn have matching tool_use entries.
+										if (
+											lastHistoryMsg?.role === "assistant" &&
+											Array.isArray(lastHistoryMsg.content)
+										) {
+											lastHistoryMsg.content.push(...historyToolUseBlocks)
+											await this.saveApiConversationHistory()
+										}
+
+										// Strip the extracted tool call XML from the displayed text
+										// so users see clean prose rather than raw XML markup.
+										// extracted.cleanedText has both thinking tags and tool call
+										// XML removed by TextToolCallExtractor.extract().
+										if (extracted.cleanedText !== textToScan) {
+											for (const block of this.assistantMessageContent) {
+												if (block.type === "text") {
+													;(block as TextContent).content = extracted.cleanedText
+												}
+											}
+											const lastTextMsgIdx = findLastIndex(
+												this.clineMessages,
+												(m) => m.type === "say" && m.say === "text",
+											)
+											if (lastTextMsgIdx !== -1 && this.clineMessages[lastTextMsgIdx]) {
+												this.clineMessages[lastTextMsgIdx].text = extracted.cleanedText
+												await this.updateClineMessage(this.clineMessages[lastTextMsgIdx])
+											}
+										}
+
+										didToolUse = true
+										// Reset so we wait for the newly injected tool blocks to execute
+										this.userMessageContentReady = false
+										// Re-present the message with the new tool blocks
+										presentAssistantMessage(this)
+										// Wait for tool execution to complete and results to accumulate
+										await pWaitFor(() => this.userMessageContentReady)
+									}
 								}
 							}
 						}
