@@ -105,6 +105,18 @@ export class TextToolCallExtractor {
 		return { toolCalls, thinking, cleanedText }
 	}
 
+	/**
+	 * Remove inline thinking tags from a text string without extracting their
+	 * content.  Used to clean already-displayed text blocks after the thinking
+	 * content has been emitted as a separate reasoning block.
+	 *
+	 * @param text - The raw text that may contain thinking tags
+	 * @returns The text with all thinking tag pairs (and their content) removed
+	 */
+	static removeThinkingTags(text: string): string {
+		return text.replace(THINKING_TAG_REGEX, "").trim()
+	}
+
 	// ---------------------------------------------------------------------------
 	// Private helpers
 	// ---------------------------------------------------------------------------

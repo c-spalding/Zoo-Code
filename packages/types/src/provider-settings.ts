@@ -208,9 +208,14 @@ const baseProviderSettingsSchema = z.object({
 
 	// When true, if the model responds with text only (no native tool calls), the
 	// system will attempt to extract tool calls from XML markup or JSON-in-fenced-code
-	// blocks in the text. Also extracts inline thinking tags and renders them as
-	// collapsible reasoning blocks. Useful for open-weight models via Bedrock.
+	// blocks in the text. Useful for open-weight models that do not support native
+	// function-calling (e.g. via Bedrock or local inference servers).
 	textToolCallFallback: z.boolean().optional(),
+
+	// When true, inline thinking tags (<think>, <thinking>, <reasoning>) in the
+	// model's text output are extracted and rendered as collapsible reasoning blocks.
+	// Independent of textToolCallFallback - can be used with any provider.
+	extractInlineThinking: z.boolean().optional(),
 })
 
 // Several of the providers share common model config properties.

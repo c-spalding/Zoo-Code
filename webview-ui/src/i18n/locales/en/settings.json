@@ -847,7 +847,11 @@
 		},
 		"textToolCallFallback": {
 			"label": "Extract tool calls from text",
-			"description": "When models emit tool calls as XML or JSON in their text output (common with open-weight models that do not support native function-calling, e.g. via Bedrock or local inference servers), attempt to extract and execute them. Inline thinking tags are rendered as collapsible reasoning blocks."
+			"description": "When models emit tool calls as XML or JSON in their text output (common with open-weight models that do not support native function-calling, e.g. via Bedrock or local inference servers), attempt to extract and execute them."
+		},
+		"extractInlineThinking": {
+			"label": "Extract inline thinking tags",
+			"description": "When models wrap their chain-of-thought in <think>, <thinking>, or <reasoning> tags, strip those tags from the displayed text and render the content as a collapsible reasoning block instead. Useful for open-weight models that emit visible thinking in their text output."
 		}
 	},
 	"experimental": {

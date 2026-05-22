@@ -3702,9 +3702,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 
 					// --- Inline Thinking Extraction + Text-to-Tool Fallback ---
-					// Always scan text blocks for inline thinking tags (<think>, <thinking>,
-					// <reasoning>) and emit them as collapsible reasoning blocks, regardless
-					// of whether native tool calls were found.
+					// When extractInlineThinking is enabled, scan text blocks for inline
+					// thinking tags (<think>, <thinking>, <reasoning>) and emit them as
+					// collapsible reasoning blocks. The raw text blocks are updated to
+					// remove the extracted tags so the user does not see duplicated content.
 					// When textToolCallFallback is also enabled and no native tool calls were
 					// found, additionally attempt to extract XML/JSON tool calls from the text.
 					{
@@ -3721,59 +3722,93 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							const fallbackModeState = fallbackProvider ? await fallbackProvider.getState() : undefined
 							const textToolCallFallback =
 								fallbackModeState?.apiConfiguration?.textToolCallFallback ?? false
+							const extractInlineThinking =
+								fallbackModeState?.apiConfiguration?.extractInlineThinking ?? false
 
-							// Always determine allowed tools - needed for extraction and also for
-							// validating thinking-only responses when fallback is off.
-							const modeSlug =
-								fallbackModeState?.mode ?? (await import("../../shared/modes")).defaultModeSlug
-							const customModes = fallbackModeState?.customModes ?? []
-							const experiments = fallbackModeState?.experiments ?? {}
-							const settings = {
-								todoListEnabled: fallbackModeState?.apiConfiguration?.todoListEnabled ?? true,
-							}
-							const { isToolAllowedInMode } = await import("../prompts/tools/filter-tools-for-mode")
-							const { toolNames } = await import("@roo-code/types")
-							const allowedTools = textToolCallFallback
-								? toolNames.filter((name) =>
-										isToolAllowedInMode(
-											name,
-											modeSlug,
-											customModes,
-											experiments,
-											undefined,
-											settings,
-										),
-									)
-								: [] // When not doing tool extraction, pass empty list (thinking still extracted)
-
-							const extracted = TextToolCallExtractor.extract(textBlocks, allowedTools)
-
-							// Always emit thinking content as a reasoning block when found,
-							// regardless of whether tool call fallback is enabled.
-							if (extracted.thinking) {
-								await this.say("reasoning", extracted.thinking)
-							}
-
-							// Only inject extracted tool calls when the fallback is enabled
-							// and no native tool calls were already found.
-							if (!didToolUse && textToolCallFallback && extracted.toolCalls.length > 0) {
-								// Convert extracted calls to ToolUse blocks with synthetic IDs
-								for (const call of extracted.toolCalls) {
-									const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
-									const toolUseBlock: import("../../shared/tools").ToolUse = {
-										type: "tool_use",
-										name: call.name,
-										params: call.params as Partial<
-											Record<import("../../shared/tools").ToolParamName, string>
-										>,
-										partial: false,
-										id: syntheticId,
-									}
-									this.assistantMessageContent.push(toolUseBlock)
+							// Only proceed if at least one of the features is enabled
+							if (extractInlineThinking || textToolCallFallback) {
+								const modeSlug =
+									fallbackModeState?.mode ?? (await import("../../shared/modes")).defaultModeSlug
+								const customModes = fallbackModeState?.customModes ?? []
+								const experiments = fallbackModeState?.experiments ?? {}
+								const settings = {
+									todoListEnabled: fallbackModeState?.apiConfiguration?.todoListEnabled ?? true,
 								}
-								didToolUse = true
-								// Re-present the message with the new tool blocks
-								presentAssistantMessage(this)
+								const { isToolAllowedInMode } = await import("../prompts/tools/filter-tools-for-mode")
+								const { toolNames } = await import("@roo-code/types")
+								const allowedTools = textToolCallFallback
+									? toolNames.filter((name) =>
+											isToolAllowedInMode(
+												name,
+												modeSlug,
+												customModes,
+												experiments,
+												undefined,
+												settings,
+											),
+										)
+									: [] // When only extracting thinking, pass empty list (no tool extraction)
+
+								const extracted = TextToolCallExtractor.extract(textBlocks, allowedTools)
+
+								// When thinking was found and extraction is enabled, clean the raw
+								// text blocks by removing the thinking tags so they are not shown
+								// twice (once as raw XML in the text stream and once as a rendered
+								// reasoning block).  We do this BEFORE emitting the reasoning say
+								// so the reasoning block precedes the cleaned text in the message
+								// history from the user's perspective.
+								if (extractInlineThinking && extracted.thinking) {
+									// Replace each text block's content with the cleaned version
+									// (thinking tags removed).  The extractor already built
+									// cleanedText which is the joined result; we must distribute
+									// the removals back to the individual blocks.
+									for (const block of this.assistantMessageContent) {
+										if (block.type === "text") {
+											const textBlock = block as import("../../shared/tools").TextContent
+											textBlock.content = TextToolCallExtractor.removeThinkingTags(
+												textBlock.content,
+											)
+										}
+									}
+
+									// Update the last saved text message (if any) so the webview
+									// reflects the cleaned content.
+									const lastTextMsgIdx = findLastIndex(
+										this.clineMessages,
+										(m) => m.type === "say" && m.say === "text",
+									)
+									if (lastTextMsgIdx !== -1) {
+										const msg = this.clineMessages[lastTextMsgIdx]
+										if (msg.text) {
+											msg.text = TextToolCallExtractor.removeThinkingTags(msg.text)
+											await this.updateClineMessage(msg)
+										}
+									}
+
+									await this.say("reasoning", extracted.thinking)
+								}
+
+								// Only inject extracted tool calls when the fallback is enabled
+								// and no native tool calls were already found.
+								if (!didToolUse && textToolCallFallback && extracted.toolCalls.length > 0) {
+									// Convert extracted calls to ToolUse blocks with synthetic IDs
+									for (const call of extracted.toolCalls) {
+										const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
+										const toolUseBlock: import("../../shared/tools").ToolUse = {
+											type: "tool_use",
+											name: call.name,
+											params: call.params as Partial<
+												Record<import("../../shared/tools").ToolParamName, string>
+											>,
+											partial: false,
+											id: syntheticId,
+										}
+										this.assistantMessageContent.push(toolUseBlock)
+									}
+									didToolUse = true
+									// Re-present the message with the new tool blocks
+									presentAssistantMessage(this)
+								}
 							}
 						}
 					}
