@@ -2,9 +2,14 @@
 Semantics for Reasoning Effort (ThinkingBudget)
 
 Capability surface:
-- modelInfo.supportsReasoningEffort: boolean | Array&lt;"disable" | "none" | "minimal" | "low" | "medium" | "high"&gt;
+- modelInfo.supportsReasoningEffort: boolean | Array<"disable" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max">
   - true  → UI shows ["low","medium","high"]
   - array → UI shows exactly the provided values
+
+Effort levels (per platform.claude.com/docs/en/build-with-claude/effort and OpenAI docs):
+  - "minimal" / "low" / "medium" / "high": broadly supported.
+  - "xhigh":  GPT-5.x, Anthropic Opus 4.7.
+  - "max":    Anthropic Opus 4.7, Sonnet 4.6 - removes any effort cap.
 
 Selection behavior:
 - "disable":
@@ -17,7 +22,7 @@ Selection behavior:
   - set enableReasoningEffort = true
   - persist reasoningEffort = "none"
   - request builders include reasoning with value "none"
-- "minimal" | "low" | "medium" | "high":
+- "minimal" | "low" | "medium" | "high" | "xhigh" | "max":
   - set enableReasoningEffort = true
   - persist the selected value
   - request builders include reasoning with the selected effort
@@ -35,12 +40,7 @@ Notes:
 import { useEffect, type ReactNode } from "react"
 import { Checkbox } from "vscrui"
 
-import {
-	type ProviderSettings,
-	type ModelInfo,
-	type ReasoningEffortWithMinimal,
-	reasoningEfforts,
-} from "@roo-code/types"
+import { type ProviderSettings, type ModelInfo, type ReasoningEffortExtended, reasoningEfforts } from "@roo-code/types"
 
 import {
 	DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
@@ -99,14 +99,18 @@ export const ThinkingBudget = ({
 	const isReasoningBudgetRequired = !!modelInfo && modelInfo.requiredReasoningBudget
 	const isReasoningEffortSupported = !!modelInfo && modelInfo.supportsReasoningEffort
 
-	// Build available reasoning efforts list from capability
+	// Build available reasoning efforts list from capability.
+	// `ReasoningEffortExtended` covers the full universe of values the type system
+	// recognises ("none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max").
+	// Some models opt into a subset via `supportsReasoningEffort: [...]`; we honour
+	// whatever shape they advertise rather than narrowing the type here.
 	const supports = modelInfo?.supportsReasoningEffort
-	const baseAvailableOptions: ReadonlyArray<ReasoningEffortWithMinimal> =
+	const baseAvailableOptions: ReadonlyArray<ReasoningEffortExtended> =
 		supports === true
-			? (reasoningEfforts as readonly ReasoningEffortWithMinimal[])
+			? (reasoningEfforts as readonly ReasoningEffortExtended[])
 			: Array.isArray(supports)
-				? (supports as ReadonlyArray<ReasoningEffortWithMinimal>)
-				: (reasoningEfforts as readonly ReasoningEffortWithMinimal[])
+				? (supports as ReadonlyArray<ReasoningEffortExtended>)
+				: (reasoningEfforts as readonly ReasoningEffortExtended[])
 
 	// "disable" turns off reasoning entirely; "none" is a valid reasoning level.
 	// Both display as "None" in the UI but behave differently.
@@ -114,7 +118,7 @@ export const ThinkingBudget = ({
 	// 1. requiredReasoningEffort is not true, AND
 	// 2. supportsReasoningEffort is boolean true (not an explicit array)
 	// When the model provides an explicit array, respect those exact values.
-	type ReasoningEffortOption = ReasoningEffortWithMinimal | "none" | "disable"
+	type ReasoningEffortOption = ReasoningEffortExtended | "disable"
 	const shouldAutoAddDisable =
 		!modelInfo?.requiredReasoningEffort && supports === true && !baseAvailableOptions.includes("disable" as any)
 	const availableOptions: ReadonlyArray<ReasoningEffortOption> = shouldAutoAddDisable
@@ -123,7 +127,7 @@ export const ThinkingBudget = ({
 
 	// Default reasoning effort - use model's default if available
 	// GPT-5 models have "medium" as their default in the model configuration
-	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortWithMinimal | undefined
+	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortExtended | undefined
 	const defaultReasoningEffort: ReasoningEffortOption = modelInfo?.requiredReasoningEffort
 		? modelDefaultReasoningEffort || "medium"
 		: "disable"
@@ -136,7 +140,7 @@ export const ThinkingBudget = ({
 		if (isReasoningEffortSupported && !apiConfiguration.reasoningEffort) {
 			// Only set a default if reasoning is required, otherwise leave as undefined (which maps to "disable")
 			if (modelInfo?.requiredReasoningEffort && defaultReasoningEffort !== "disable") {
-				setApiConfigurationField("reasoningEffort", defaultReasoningEffort as ReasoningEffortWithMinimal, false)
+				setApiConfigurationField("reasoningEffort", defaultReasoningEffort as ReasoningEffortExtended, false)
 			}
 		}
 	}, [
@@ -147,16 +151,27 @@ export const ThinkingBudget = ({
 		setApiConfigurationField,
 	])
 
-	// Sync enableReasoningEffort based on selection
-	// "disable" turns off reasoning; "none" is a valid level (reasoning enabled)
+	// Sync enableReasoningEffort based on dropdown selection.
+	//
+	// This effect is only meaningful for the EFFORT-ONLY path, where the dropdown
+	// is the user's single source of truth for whether reasoning is on. In the
+	// adaptive-thinking path (both budget + effort) the dedicated "Use reasoning"
+	// checkbox above is the source of truth, and forcibly re-enabling reasoning
+	// here would prevent the user from ever switching it off (issue: ticking the
+	// checkbox off would be immediately reverted because the dropdown still shows
+	// a non-"disable" value).
+	//
+	// We also skip this when supportsReasoningBudget is true, because budget-only
+	// models render their own checkbox and don't expose the effort dropdown at all.
+	const isEffortOnlyPath = isReasoningEffortSupported && !isReasoningBudgetSupported
 	useEffect(() => {
-		if (!isReasoningEffortSupported) return
+		if (!isEffortOnlyPath) return
 		const shouldEnable = modelInfo?.requiredReasoningEffort || currentReasoningEffort !== "disable"
 		if (shouldEnable && apiConfiguration.enableReasoningEffort !== true) {
 			setApiConfigurationField("enableReasoningEffort", true, false)
 		}
 	}, [
-		isReasoningEffortSupported,
+		isEffortOnlyPath,
 		modelInfo?.requiredReasoningEffort,
 		currentReasoningEffort,
 		apiConfiguration.enableReasoningEffort,
@@ -208,6 +223,55 @@ export const ThinkingBudget = ({
 		DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
 	)
 
+	// Models that advertise BOTH a reasoning budget AND an effort capability are
+	// using Anthropic's "adaptive" thinking shape (e.g. Bedrock Opus 4.7). On those
+	// models the API ignores any token-budget input - the model decides how long to
+	// think based on the effort bucket - so the per-thinking-tokens slider would be
+	// misleading. We keep the max output-tokens control because it caps the overall
+	// response envelope and is independent of how hard the model thinks.
+	//
+	// See https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html:
+	//   "Claude Opus 4.7 ... only support adaptive thinking. Manual extended thinking
+	//    (thinking.type: 'enabled' with budget_tokens) is not supported on these
+	//    models and will return a 400 error."
+	const useAdaptiveEffortInsteadOfBudget =
+		isReasoningBudgetSupported && isReasoningEffortSupported && Array.isArray(supports) && supports.length > 0
+
+	// The max-output-tokens control is rendered for ALL hybrid-reasoning models
+	// regardless of whether reasoning is currently enabled, because that cap is
+	// the response-length envelope and is independent of whether the model thinks.
+	// Previously this slider was hidden when the user unchecked "Use reasoning",
+	// which made it impossible to lower the output cap without first enabling
+	// reasoning - misleading and unrelated to the thinking toggle.
+	const renderMaxOutputTokensControl = () => (
+		<div className="flex flex-col gap-1">
+			<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
+			{useEnhancedMaxOutputControl ? (
+				<MaxOutputTokensControl
+					value={customMaxOutputTokens}
+					min={8192}
+					max={maxOutputTokensSliderMax}
+					defaultValue={DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS}
+					onChange={(value) => setApiConfigurationField("modelMaxTokens", value)}
+					inputAriaLabel={t("settings:thinkingBudget.maxTokens")}
+					extraSlot={maxOutputTokensExtraSlot}
+					helperText={maxOutputTokensHelperText}
+				/>
+			) : (
+				<div className="flex items-center gap-1">
+					<Slider
+						min={8192}
+						max={maxOutputTokensSliderMax}
+						step={1024}
+						value={[customMaxOutputTokens]}
+						onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
+					/>
+					<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
+				</div>
+			)}
+		</div>
+	)
+
 	return isReasoningBudgetSupported && !!modelInfo.maxTokens ? (
 		<>
 			{!isReasoningBudgetRequired && (
@@ -221,34 +285,48 @@ export const ThinkingBudget = ({
 					</Checkbox>
 				</div>
 			)}
-			{(isReasoningBudgetRequired || enableReasoningEffort) && (
-				<>
-					<div className="flex flex-col gap-1">
-						<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
-						{useEnhancedMaxOutputControl ? (
-							<MaxOutputTokensControl
-								value={customMaxOutputTokens}
-								min={8192}
-								max={maxOutputTokensSliderMax}
-								defaultValue={DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS}
-								onChange={(value) => setApiConfigurationField("modelMaxTokens", value)}
-								inputAriaLabel={t("settings:thinkingBudget.maxTokens")}
-								extraSlot={maxOutputTokensExtraSlot}
-								helperText={maxOutputTokensHelperText}
-							/>
-						) : (
-							<div className="flex items-center gap-1">
-								<Slider
-									min={8192}
-									max={maxOutputTokensSliderMax}
-									step={1024}
-									value={[customMaxOutputTokens]}
-									onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
+			{renderMaxOutputTokensControl()}
+			{(isReasoningBudgetRequired || enableReasoningEffort) &&
+				(useAdaptiveEffortInsteadOfBudget ? (
+					<div className="flex flex-col gap-1" data-testid="reasoning-effort">
+						<label className="block font-medium mb-1">
+							{t("settings:providers.reasoningEffort.label")}
+						</label>
+						<Select
+							value={
+								currentReasoningEffort === "disable" || currentReasoningEffort === "none"
+									? (modelDefaultReasoningEffort ?? "medium")
+									: currentReasoningEffort
+							}
+							onValueChange={(value: ReasoningEffortOption) => {
+								// In adaptive mode "disable" / "none" can't be selected here
+								// because the parent checkbox already gates whether reasoning
+								// is on. Persist the picked effort as-is.
+								setApiConfigurationField("reasoningEffort", value as ReasoningEffortExtended)
+							}}>
+							<SelectTrigger className="w-full">
+								<SelectValue
+									placeholder={t(
+										`settings:providers.reasoningEffort.${
+											currentReasoningEffort === "disable" || currentReasoningEffort === "none"
+												? (modelDefaultReasoningEffort ?? "medium")
+												: currentReasoningEffort
+										}`,
+									)}
 								/>
-								<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
-							</div>
-						)}
+							</SelectTrigger>
+							<SelectContent>
+								{baseAvailableOptions.map((value) => (
+									<SelectItem key={value} value={value}>
+										{value === "none"
+											? t("settings:providers.reasoningEffort.none")
+											: t(`settings:providers.reasoningEffort.${value}`)}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
 					</div>
+				) : (
 					<div className="flex flex-col gap-1">
 						<div className="font-medium">{t("settings:thinkingBudget.maxThinkingTokens")}</div>
 						<div className="flex items-center gap-1" data-testid="reasoning-budget">
@@ -262,8 +340,7 @@ export const ThinkingBudget = ({
 							<div className="w-12 text-sm text-center">{customMaxThinkingTokens}</div>
 						</div>
 					</div>
-				</>
-			)}
+				))}
 		</>
 	) : isReasoningEffortSupported ? (
 		<div className="flex flex-col gap-1" data-testid="reasoning-effort">
@@ -278,9 +355,9 @@ export const ThinkingBudget = ({
 						setApiConfigurationField("enableReasoningEffort", false)
 						setApiConfigurationField("reasoningEffort", "disable")
 					} else {
-						// "none", "minimal", "low", "medium", "high" all enable reasoning
+						// "none" / "minimal" / "low" / "medium" / "high" / "xhigh" / "max" all enable reasoning
 						setApiConfigurationField("enableReasoningEffort", true)
-						setApiConfigurationField("reasoningEffort", value as ReasoningEffortWithMinimal)
+						setApiConfigurationField("reasoningEffort", value as ReasoningEffortExtended)
 					}
 				}}>
 				<SelectTrigger className="w-full">

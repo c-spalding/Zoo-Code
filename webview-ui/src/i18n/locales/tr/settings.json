@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Görev görünümüne dön",
 	"common": {
 		"save": "Kaydet",
@@ -533,6 +533,7 @@
 			"minimal": "Minimal (en hızlı)",
 			"high": "Yüksek",
 			"xhigh": "Çok yüksek",
+			"max": "Maksimum (sınırsız)",
 			"medium": "Orta",
 			"low": "Düşük"
 		},

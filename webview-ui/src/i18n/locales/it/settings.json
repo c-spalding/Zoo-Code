@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Torna alla vista attività",
 	"common": {
 		"save": "Salva",
@@ -533,6 +533,7 @@
 			"minimal": "Minimo (più veloce)",
 			"high": "Alto",
 			"xhigh": "Molto alto",
+			"max": "Massimo (senza limite)",
 			"medium": "Medio",
 			"low": "Basso"
 		},

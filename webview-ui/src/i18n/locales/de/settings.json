@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Zurück zur Aufgabenansicht",
 	"common": {
 		"save": "Speichern",
@@ -533,6 +533,7 @@
 			"minimal": "Minimal (schnellste)",
 			"high": "Hoch",
 			"xhigh": "Sehr hoch",
+			"max": "Maximum (ohne Limit)",
 			"medium": "Mittel",
 			"low": "Niedrig"
 		},

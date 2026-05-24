@@ -21,9 +21,23 @@ export type ReasoningEffortWithMinimal = z.infer<typeof reasoningEffortWithMinim
 
 /**
  * Extended Reasoning Effort (includes "none" and "minimal")
- * Note: "disable" is a UI/control value, not a value sent as effort
+ *
+ * Note: "disable" is a UI/control value, not a value sent as effort.
+ *
+ * Supported by which models (per platform.claude.com/docs/en/build-with-claude/effort
+ * and OpenAI / Codex docs):
+ *   - "none" / "minimal" / "low" / "medium" / "high":
+ *       broadly supported across reasoning-capable models.
+ *   - "xhigh":
+ *       OpenAI GPT-5.x reasoning, Anthropic Opus 4.7 (adaptive thinking).
+ *   - "max":
+ *       Anthropic Opus 4.7, Sonnet 4.6 (adaptive thinking) - gives the model
+ *       no time/effort budget cap.
+ *
+ * Per-model gating is via `ModelInfo.supportsReasoningEffort`; this enum just
+ * defines the universe of values the UI / runtime can pass through.
  */
-export const reasoningEffortsExtended = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
+export const reasoningEffortsExtended = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 export const reasoningEffortExtendedSchema = z.enum(reasoningEffortsExtended)
 
@@ -32,7 +46,16 @@ export type ReasoningEffortExtended = z.infer<typeof reasoningEffortExtendedSche
 /**
  * Reasoning Effort user setting (includes "disable")
  */
-export const reasoningEffortSettingValues = ["disable", "none", "minimal", "low", "medium", "high", "xhigh"] as const
+export const reasoningEffortSettingValues = [
+	"disable",
+	"none",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const
 export const reasoningEffortSettingSchema = z.enum(reasoningEffortSettingValues)
 
 /**
@@ -89,7 +112,7 @@ export const modelInfoSchema = z.object({
 	defaultTemperature: z.number().optional(),
 	requiredReasoningBudget: z.boolean().optional(),
 	supportsReasoningEffort: z
-		.union([z.boolean(), z.array(z.enum(["disable", "none", "minimal", "low", "medium", "high", "xhigh"]))])
+		.union([z.boolean(), z.array(z.enum(["disable", "none", "minimal", "low", "medium", "high", "xhigh", "max"]))])
 		.optional(),
 	requiredReasoningEffort: z.boolean().optional(),
 	preserveReasoning: z.boolean().optional(),

@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Back to tasks view",
 	"common": {
 		"save": "Save",
@@ -617,7 +617,8 @@
 			"low": "Low",
 			"medium": "Medium",
 			"high": "High",
-			"xhigh": "Extra High"
+			"xhigh": "Extra High",
+			"max": "Maximum (no cap)"
 		},
 		"verbosity": {
 			"label": "Output Verbosity",

@@ -188,6 +188,14 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		// Opus 4.7 on Bedrock uses the adaptive thinking shape, where the user (or the
+		// runtime, derived from the budget slider) picks an effort bucket. Per
+		// https://platform.claude.com/docs/en/build-with-claude/effort the supported
+		// values for Opus 4.7 are low / medium / high / xhigh / max. Exposing this
+		// capability lets the UI render an effort dropdown alongside the reasoning
+		// toggle so users can pick a level explicitly rather than relying on the
+		// budget-derived fallback inside AwsBedrockHandler.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		// Opus 4.7 rejects requests that include a temperature parameter; the Bedrock
 		// inferenceConfig must omit it. The model-params layer honors this flag by
 		// setting params.temperature = undefined, and the Bedrock handler drops the

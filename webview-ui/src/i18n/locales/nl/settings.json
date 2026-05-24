@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Terug naar takenoverzicht",
 	"common": {
 		"save": "Opslaan",
@@ -533,6 +533,7 @@
 			"minimal": "Minimaal (Snelst)",
 			"high": "Hoog",
 			"xhigh": "Zeer hoog",
+			"max": "Maximum (geen limiet)",
 			"medium": "Middel",
 			"low": "Laag"
 		},

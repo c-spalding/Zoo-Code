@@ -79,9 +79,28 @@ interface BedrockInferenceConfig {
 //     unknown top-level keys are silently dropped before the request reaches Anthropic,
 //     which is why earlier code that placed output_config at the top level resulted in
 //     Opus 4.7 receiving no effort signal and producing no reasoning output.
+//
+// Effort values per https://platform.claude.com/docs/en/build-with-claude/effort:
+//   - low / medium / high are accepted by all adaptive-thinking models.
+//   - xhigh is accepted by Opus 4.7 (and OpenAI GPT-5.x via different paths).
+//   - max is accepted by Opus 4.7 / Sonnet 4.6 - removes any effort cap.
+type BedrockAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max"
+
+// Adaptive-thinking display modes (Opus 4.7+).
+//   - "summarized": stream a summary of the reasoning chain to the client (default
+//     on Opus 4.6, must be opted into on Opus 4.7).
+//   - "omitted":    return reasoning blocks but with empty `thinking` text. This is
+//     the silent default on Opus 4.7 per the Anthropic migration guide:
+//     https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-to-claude-opus-4-7
+//
+// We always set `display: "summarized"` on Opus 4.7 so users see thinking progress
+// in the chat UI; otherwise the request appears to hang silently while the model
+// reasons server-side.
+type BedrockAdaptiveDisplay = "summarized" | "omitted"
+
 interface BedrockAdditionalModelFields {
-	thinking?: { type: "enabled"; budget_tokens: number } | { type: "adaptive" }
-	output_config?: { effort: "low" | "medium" | "high" }
+	thinking?: { type: "enabled"; budget_tokens: number } | { type: "adaptive"; display?: BedrockAdaptiveDisplay }
+	output_config?: { effort: BedrockAdaptiveEffort }
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
@@ -109,14 +128,20 @@ interface BedrockPayload {
 /**
  * Map a reasoning budget (in tokens) to a coarse effort bucket for the adaptive
  * thinking payload. Used only when invoking Bedrock models that require the newer
- * `thinking: { type: "adaptive" }` + `output_config.effort` shape.
+ * `thinking: { type: "adaptive" }` + `output_config.effort` shape, AND only as a
+ * fallback when the user hasn't explicitly picked an effort via the UI.
  *
- * The thresholds mirror the historical budget ranges exposed by the reasoning UI:
+ * Note: this never derives "xhigh" or "max" from the budget slider - those values
+ * mean "go beyond the standard high effort" and should only be set when the user
+ * explicitly opts in (so that bumping the slider for a longer reasoning trace
+ * doesn't silently push users into the most expensive effort bucket).
+ *
+ * Thresholds mirror the historical budget ranges exposed by the reasoning UI:
  *   <=  4096 tokens → "low"
  *   <= 16384 tokens → "medium"
  *    > 16384 tokens → "high"
  */
-function mapReasoningBudgetToBedrockEffort(budget: number | undefined): "low" | "medium" | "high" {
+function mapReasoningBudgetToBedrockEffort(budget: number | undefined): BedrockAdaptiveEffort {
 	const b = typeof budget === "number" && Number.isFinite(budget) && budget > 0 ? budget : 0
 	if (b <= 4096) return "low"
 	if (b <= 16384) return "medium"
@@ -124,14 +149,29 @@ function mapReasoningBudgetToBedrockEffort(budget: number | undefined): "low" | 
 }
 
 /**
- * Normalize a freeform reasoning-effort setting string to the three buckets Bedrock
- * accepts on `output_config.effort`. Unknown or disabled values return undefined so
- * the caller can fall back to the budget-derived mapping.
+ * Normalize a freeform reasoning-effort setting string to the buckets Bedrock
+ * accepts on `output_config.effort`. Unknown or disabled values return undefined
+ * so the caller can fall back to the budget-derived mapping.
+ *
+ * Per https://platform.claude.com/docs/en/build-with-claude/effort:
+ *   - low / medium / high: accepted by all adaptive-thinking models.
+ *   - xhigh: Opus 4.7 (and OpenAI GPT-5.x via different paths).
+ *   - max:   Opus 4.7 / Sonnet 4.6 - removes any effort cap.
+ *
+ * Per-model gating happens via `ModelInfo.supportsReasoningEffort`. This function
+ * just normalizes the string - if the user passes "xhigh" but the model doesn't
+ * accept it, the request will be rejected by the API with a clear error rather
+ * than silently downgraded here. (Silent downgrades hide configuration mistakes.)
+ *
+ * "minimal" maps to "low" because Anthropic's enum starts at "low"; the UI
+ * occasionally presents "minimal" for cross-provider consistency.
  */
-function normalizeReasoningEffortForBedrock(value: unknown): "low" | "medium" | "high" | undefined {
+function normalizeReasoningEffortForBedrock(value: unknown): BedrockAdaptiveEffort | undefined {
 	if (typeof value !== "string") return undefined
 	const v = value.toLowerCase()
-	if (v === "low" || v === "medium" || v === "high") return v
+	if (v === "low" || v === "medium" || v === "high" || v === "xhigh" || v === "max") {
+		return v
+	}
 	if (v === "minimal") return "low"
 	return undefined
 }
@@ -504,7 +544,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
 		let thinkingEnabled = false
-		let adaptiveThinkingEffort: "low" | "medium" | "high" | undefined
+		let adaptiveThinkingEffort: BedrockAdaptiveEffort | undefined
 
 		// Resolve the base model id first so the thinking branch can decide between the
 		// legacy budget_tokens payload and the newer adaptive + output_config.effort payload.
@@ -543,8 +583,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					normalizeReasoningEffortForBedrock(
 						(this.options as ProviderSettings & { reasoningEffort?: unknown }).reasoningEffort,
 					) ?? mapReasoningBudgetToBedrockEffort(effectiveBudget)
+				// Set `display: "summarized"` so the model streams a human-readable
+				// summary of its reasoning chain back as text. The default on Opus 4.7
+				// is "omitted" (per the migration guide linked at the top of this file),
+				// which means reasoning happens server-side but the chat UI sees nothing
+				// during the long pause before the answer starts. "summarized" restores
+				// the experience users had on Opus 4.6 and earlier reasoning models.
 				additionalModelRequestFields = {
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					output_config: { effort: adaptiveThinkingEffort },
 				}
 				logger.info("Adaptive thinking enabled for Bedrock request", {

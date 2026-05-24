@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Torna a la vista de tasques",
 	"common": {
 		"save": "Desar",
@@ -533,6 +533,7 @@
 			"minimal": "Mínim (el més ràpid)",
 			"high": "Alt",
 			"xhigh": "Molt alt",
+			"max": "Màxim (sense límit)",
 			"medium": "Mitjà",
 			"low": "Baix"
 		},

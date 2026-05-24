@@ -942,7 +942,13 @@ describe("AwsBedrockHandler", () => {
 			// request reaches Anthropic. AWS itself spells this out in the rejection message
 			// for the legacy budget_tokens shape; see the comment block above
 			// BEDROCK_ADAPTIVE_THINKING_MODEL_IDS in packages/types/src/providers/bedrock.ts.
-			expect(commandArg.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
+			// We send display: "summarized" so users see thinking progress in the UI;
+			// per the Anthropic migration guide, Opus 4.7 defaults to "omitted" and
+			// would otherwise return reasoning blocks with empty text.
+			expect(commandArg.additionalModelRequestFields.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
 			expect(commandArg.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
 			expect(commandArg.additionalModelRequestFields.thinking.effort).toBeUndefined()
 			expect(commandArg.additionalModelRequestFields.output_config).toEqual({ effort: "medium" })

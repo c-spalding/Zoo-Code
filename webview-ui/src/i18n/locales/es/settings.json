@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Volver a la vista de tareas",
 	"common": {
 		"save": "Guardar",
@@ -533,6 +533,7 @@
 			"minimal": "Mínimo (el más rápido)",
 			"high": "Alto",
 			"xhigh": "Muy alto",
+			"max": "Máximo (sin límite)",
 			"medium": "Medio",
 			"low": "Bajo"
 		},

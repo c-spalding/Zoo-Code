@@ -312,7 +312,13 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 			// Opus 4.7 must use the adaptive thinking shape.
 			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
+			// Per the Anthropic migration guide, Opus 4.7 defaults reasoning to
+			// "omitted" - the model thinks but returns an empty thinking block.
+			// We send display: "summarized" so users see the thinking summary.
+			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
 			expect(capturedPayload.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
 
 			// output_config.effort must live INSIDE additionalModelRequestFields (Bedrock

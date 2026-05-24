@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Wróć do widoku zadań",
 	"common": {
 		"save": "Zapisz",
@@ -533,6 +533,7 @@
 			"minimal": "Minimalny (najszybszy)",
 			"high": "Wysoki",
 			"xhigh": "Bardzo wysoki",
+			"max": "Maksymalny (bez limitu)",
 			"medium": "Średni",
 			"low": "Niski"
 		},

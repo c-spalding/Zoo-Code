@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Retour à la vue des tâches",
 	"common": {
 		"save": "Enregistrer",
@@ -533,6 +533,7 @@
 			"minimal": "Minimal (le plus rapide)",
 			"high": "Élevé",
 			"xhigh": "Très élevé",
+			"max": "Maximum (sans limite)",
 			"medium": "Moyen",
 			"low": "Faible"
 		},

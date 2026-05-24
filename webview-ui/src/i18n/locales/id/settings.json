@@ -1,4 +1,4 @@
-{
+﻿{
 	"back": "Kembali ke tampilan tugas",
 	"common": {
 		"save": "Simpan",
@@ -533,6 +533,7 @@
 			"minimal": "Minimal (Tercepat)",
 			"high": "Tinggi",
 			"xhigh": "Sangat tinggi",
+			"max": "Maksimum (tanpa batas)",
 			"medium": "Sedang",
 			"low": "Rendah"
 		},
