@@ -934,16 +934,20 @@ describe("AwsBedrockHandler", () => {
 			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
-			// Bedrock's adaptive-thinking shape sends `thinking: { type: "adaptive" }` inside
-			// additionalModelRequestFields and `output_config: { effort: ... }` at the top
-			// level of the payload (sibling of inferenceConfig and additionalModelRequestFields).
-			// AWS itself spells this out in the rejection message for the legacy shape; see
-			// the comment block above BEDROCK_ADAPTIVE_THINKING_MODEL_IDS in
-			// packages/types/src/providers/bedrock.ts.
+			// Bedrock's adaptive-thinking shape sends BOTH `thinking: { type: "adaptive" }`
+			// and `output_config: { effort: ... }` INSIDE additionalModelRequestFields. The
+			// Converse API spec exposes only modelId / messages / system / inferenceConfig /
+			// toolConfig / additionalModelRequestFields / guardrailConfig / promptVariables
+			// at the top level - any unknown top-level keys are silently dropped before the
+			// request reaches Anthropic. AWS itself spells this out in the rejection message
+			// for the legacy budget_tokens shape; see the comment block above
+			// BEDROCK_ADAPTIVE_THINKING_MODEL_IDS in packages/types/src/providers/bedrock.ts.
 			expect(commandArg.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
 			expect(commandArg.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
 			expect(commandArg.additionalModelRequestFields.thinking.effort).toBeUndefined()
-			expect(commandArg.output_config).toEqual({ effort: "medium" })
+			expect(commandArg.additionalModelRequestFields.output_config).toEqual({ effort: "medium" })
+			// Top-level output_config must NOT be present (AWS would silently drop it).
+			expect(commandArg.output_config).toBeUndefined()
 			expect(commandArg.inferenceConfig.temperature).toBeUndefined()
 		})
 

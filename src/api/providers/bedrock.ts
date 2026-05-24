@@ -70,15 +70,32 @@ interface BedrockInferenceConfig {
 //
 // Two shapes are supported for the `thinking` field:
 //   - Legacy (Claude Sonnet/Opus 4.x, Claude 3.7): { type: "enabled", budget_tokens: N }
-//   - Adaptive (Claude Opus 4.7+):                 { type: "adaptive" } paired with a
-//     top-level `output_config.effort` string on the payload itself.
+//   - Adaptive (Claude Opus 4.7+):                 { type: "adaptive" } paired with an
+//     `output_config.effort` string. Both fields are passthrough Anthropic Messages-API
+//     fields and on Bedrock Converse must live INSIDE additionalModelRequestFields, NOT
+//     as a sibling of inferenceConfig. The Converse API spec exposes only modelId,
+//     messages, system, inferenceConfig, toolConfig, additionalModelRequestFields,
+//     guardrailConfig, promptVariables and a couple of other recognised fields - any
+//     unknown top-level keys are silently dropped before the request reaches Anthropic,
+//     which is why earlier code that placed output_config at the top level resulted in
+//     Opus 4.7 receiving no effort signal and producing no reasoning output.
 interface BedrockAdditionalModelFields {
 	thinking?: { type: "enabled"; budget_tokens: number } | { type: "adaptive" }
+	output_config?: { effort: "low" | "medium" | "high" }
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
 
-// Define interface for Bedrock payload
+// Define interface for Bedrock payload.
+//
+// NOTE: `output_config` is intentionally NOT a top-level field. The AWS SDK's
+// `ConverseStreamRequest` only recognises modelId / messages / system /
+// inferenceConfig / toolConfig / additionalModelRequestFields /
+// guardrailConfig / promptVariables / requestMetadata / performanceConfig.
+// Any unknown top-level keys are silently dropped before the request reaches
+// the Anthropic backend, which is the bug that caused Opus 4.7 to produce
+// no reasoning output. Adaptive-thinking effort is now placed inside
+// `additionalModelRequestFields` alongside `thinking: { type: "adaptive" }`.
 interface BedrockPayload {
 	modelId: BedrockModelId | string
 	messages: Message[]
@@ -87,9 +104,6 @@ interface BedrockPayload {
 	anthropic_version?: string
 	additionalModelRequestFields?: BedrockAdditionalModelFields
 	toolConfig?: ToolConfiguration
-	// Adaptive-thinking models (e.g. Claude Opus 4.7 on Bedrock) use this top-level
-	// `output_config.effort` knob instead of the legacy `thinking.budget_tokens` number.
-	output_config?: { effort: "low" | "medium" | "high" }
 }
 
 /**
@@ -517,15 +531,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				// `thinking: { type: "enabled", budget_tokens: N }` shape with:
 				//   invalid_request_error: "thinking.type.enabled" is not supported for this model.
 				//   Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
-				// Honor that by emitting `thinking: { type: "adaptive" }` plus a top-level
-				// `output_config.effort`. Effort comes from the user's reasoningEffort setting
-				// when present, otherwise we derive it from the token budget.
+				// Honor that by emitting `thinking: { type: "adaptive" }` plus an
+				// `output_config.effort` value that lives INSIDE additionalModelRequestFields
+				// (NOT at the payload's top level - the AWS SDK silently drops unknown
+				// top-level keys, which previously caused Opus 4.7 to receive no effort
+				// signal and produce no reasoning output). Effort comes from the user's
+				// reasoningEffort setting when present, otherwise we derive it from the
+				// token budget so the same UI continues to work for users who haven't
+				// explicitly picked an effort.
 				adaptiveThinkingEffort =
 					normalizeReasoningEffortForBedrock(
 						(this.options as ProviderSettings & { reasoningEffort?: unknown }).reasoningEffort,
 					) ?? mapReasoningBudgetToBedrockEffort(effectiveBudget)
 				additionalModelRequestFields = {
 					thinking: { type: "adaptive" },
+					output_config: { effort: adaptiveThinkingEffort },
 				}
 				logger.info("Adaptive thinking enabled for Bedrock request", {
 					ctx: "bedrock",
@@ -638,9 +658,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(additionalModelRequestFields && { additionalModelRequestFields }),
 			// Add anthropic_version at top level when using thinking features
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
-			// Adaptive-thinking models require the effort knob at the top level alongside
-			// `thinking: { type: "adaptive" }` inside additionalModelRequestFields.
-			...(adaptiveThinkingEffort && { output_config: { effort: adaptiveThinkingEffort } }),
 			toolConfig: buildToolConfig(strict),
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
 			...(useServiceTier && { service_tier: this.options.awsBedrockServiceTier }),

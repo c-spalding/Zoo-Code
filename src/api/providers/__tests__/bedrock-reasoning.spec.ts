@@ -315,11 +315,16 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
 			expect(capturedPayload.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
 
-			// output_config.effort must live at the top level of the payload.
-			expect(capturedPayload.output_config).toBeDefined()
-			expect(["low", "medium", "high"]).toContain(capturedPayload.output_config.effort)
+			// output_config.effort must live INSIDE additionalModelRequestFields (Bedrock
+			// silently drops unknown top-level keys).
+			expect(capturedPayload.additionalModelRequestFields.output_config).toBeDefined()
+			expect(["low", "medium", "high"]).toContain(
+				capturedPayload.additionalModelRequestFields.output_config.effort,
+			)
 			// 8192 tokens falls in the "medium" bucket per mapReasoningBudgetToBedrockEffort.
-			expect(capturedPayload.output_config.effort).toBe("medium")
+			expect(capturedPayload.additionalModelRequestFields.output_config.effort).toBe("medium")
+			// Make sure we are NOT putting it at the payload top level any more.
+			expect(capturedPayload.output_config).toBeUndefined()
 		})
 
 		it("should honor explicit reasoningEffort for Claude Opus 4.7", async () => {
@@ -346,7 +351,10 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 				// consume stream
 			}
 
-			expect(capturedPayload.output_config).toEqual({ effort: "high" })
+			// output_config now lives inside additionalModelRequestFields (Bedrock
+			// silently drops unknown top-level keys), so assert it there.
+			expect(capturedPayload.additionalModelRequestFields.output_config).toEqual({ effort: "high" })
+			expect(capturedPayload.output_config).toBeUndefined()
 		})
 
 		it("should still use legacy budget_tokens thinking payload for Claude Sonnet 4", async () => {
