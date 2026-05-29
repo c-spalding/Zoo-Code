@@ -220,6 +220,43 @@ export const bedrockModels = {
 			},
 		],
 	},
+	"anthropic.claude-opus-4-8": {
+		// Opus 4.8 builds on 4.7 with the same feature set and no breaking API changes.
+		// Per the Anthropic migration guide
+		// (https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-from-claude-opus-4-7-to-claude-opus-4-8)
+		// the model serves the FULL 1M token context window by default with no beta
+		// header and no long-context premium. We therefore set contextWindow directly
+		// to 1M and omit the dual-tier (200K + 1M) split that 4.7 still exposes via
+		// the `:1m` dropdown variant. Users who want a smaller working context can
+		// still cap it with the advanced "max tokens to send" override.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		// Same effort surface as 4.7 (low / medium / high / xhigh / max). Anthropic
+		// recalibrated the token allocation behind each bucket on 4.8, but the enum
+		// itself is unchanged.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		// Opus 4.8 inherits the 4.7 sampling-parameter rejection: temperature, top_p,
+		// and top_k at non-default values return a 400. The model-params layer honors
+		// this flag by suppressing temperature in the Bedrock inferenceConfig.
+		supportsTemperature: false,
+		// Pricing matches 4.7 (flat $5/$25 input/output, $6.25 cache writes,
+		// $0.50 cache reads). Anthropic's pricing page lists these unchanged for 4.8,
+		// and the 1M context window does NOT incur a long-context surcharge.
+		inputPrice: 5.0,
+		outputPrice: 25.0,
+		cacheWritesPrice: 6.25,
+		cacheReadsPrice: 0.5,
+		// Opus 4.8 lowers the prompt-cache minimum from 4.7's larger floor to 1,024
+		// tokens, matching the value already used here. We keep the existing 4-point
+		// cap for parity with the rest of the Anthropic-on-Bedrock entries.
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description: "Claude Opus 4.8 - most capable Opus model for agentic coding (native 1M context, default)",
+	},
 	"anthropic.claude-opus-4-5-20251101-v1:0": {
 		// Mirrors anthropic-direct cap; AWS Bedrock accepts the same upstream maximum.
 		maxTokens: 32_000,
@@ -581,6 +618,12 @@ export const BEDROCK_REGIONS = [
 	{ value: "us-gov-west-1", label: "us-gov-west-1" },
 ].sort((a, b) => a.value.localeCompare(b.value))
 
+// Models that expose a 1M-token context window as an OPT-IN tier. Surfacing them in this
+// list triggers the dual-variant dropdown expansion in `expandBedrockTargetsWith1MVariants`,
+// which emits both a default-context entry and a synthetic `:1m` twin so the user can
+// pick explicitly. Models that serve 1M context BY DEFAULT (e.g. Opus 4.8) intentionally
+// stay out of this list - their `contextWindow` is already 1M, so there's no second tier
+// to select between.
 export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -595,7 +638,11 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // betas like `fine-grained-tool-streaming-2025-05-14` — when invoking them.
 // See: https://github.com/continuedev/continue/pull/11969 for the Bedrock validation
 // behavior that surfaced this issue.
-export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = ["anthropic.claude-opus-4-7"] as const
+//
+// Opus 4.8 also belongs here even though it isn't in BEDROCK_1M_CONTEXT_MODEL_IDS:
+// its 1M context is the DEFAULT (always on), so there's no opt-in tier dropdown,
+// but the Bedrock runtime still must avoid sending the legacy 1M beta header.
+export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = ["anthropic.claude-opus-4-7", "anthropic.claude-opus-4-8"] as const
 
 // Models that REJECT the legacy `thinking: { type: "enabled", budget_tokens: N }` payload
 // on the Bedrock Converse API and instead require the newer adaptive thinking format:
@@ -605,7 +652,7 @@ export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = ["anthropic.claude-opus-4-7"]
 // Attempting to send the legacy shape results in:
 //   invalid_request_error: "thinking.type.enabled" is not supported for this model.
 //   Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
-export const BEDROCK_ADAPTIVE_THINKING_MODEL_IDS = ["anthropic.claude-opus-4-7"] as const
+export const BEDROCK_ADAPTIVE_THINKING_MODEL_IDS = ["anthropic.claude-opus-4-7", "anthropic.claude-opus-4-8"] as const
 
 // Previously Claude 4.6 Sonnet/Opus auto-advertised 1M. With the new dual dropdown
 // (default-context + `:1m` variant) the UI always exposes both tiers explicitly, so
@@ -1039,7 +1086,7 @@ export const resolveBedrockModelInfo = ({
 }
 
 // Amazon Bedrock models that support Global Inference profiles
-// As of Apr 2026, AWS supports Global Inference for:
+// As of May 2026, AWS supports Global Inference for:
 // - Claude Sonnet 4
 // - Claude Sonnet 4.5
 // - Claude Sonnet 4.6
@@ -1047,6 +1094,7 @@ export const resolveBedrockModelInfo = ({
 // - Claude Opus 4.5
 // - Claude Opus 4.6
 // - Claude Opus 4.7
+// - Claude Opus 4.8
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1055,6 +1103,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-4-5-20251101-v1:0",
 	"anthropic.claude-opus-4-6-v1",
 	"anthropic.claude-opus-4-7",
+	"anthropic.claude-opus-4-8",
 ] as const
 
 // Amazon Bedrock Service Tier types

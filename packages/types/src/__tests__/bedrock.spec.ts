@@ -4,6 +4,7 @@ import {
 	BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS,
+	BEDROCK_ADAPTIVE_THINKING_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
 	bedrockModels,
@@ -64,6 +65,41 @@ describe("Bedrock model catalog", () => {
 		expect((bedrockModels["anthropic.claude-sonnet-4-5-20250929-v1:0"] as ModelInfo).promptCacheTtl).toBe("1h")
 		expect((bedrockModels["anthropic.claude-haiku-4-5-20251001-v1:0"] as ModelInfo).promptCacheTtl).toBe("1h")
 		expect((bedrockModels["anthropic.claude-opus-4-5-20251101-v1:0"] as ModelInfo).promptCacheTtl).toBe("1h")
+	})
+
+	it("includes Claude Opus 4.8 with 1M context as the default (no opt-in tier)", () => {
+		const opus48 = bedrockModels["anthropic.claude-opus-4-8" as keyof typeof bedrockModels] as ModelInfo
+		expect(opus48).toBeDefined()
+		// Opus 4.8 serves the full 1M context by default; no 200K base / 1M tier split.
+		expect(opus48.contextWindow).toBe(1_000_000)
+		expect(opus48.tiers).toBeUndefined()
+		// Mirrors 4.7's max output cap so the reasoning-budget slider extends past 8K.
+		expect(opus48.maxTokens).toBe(128_000)
+		// Same feature set as 4.7: adaptive thinking, no temperature, full effort enum.
+		expect(opus48.supportsReasoningBudget).toBe(true)
+		expect(opus48.supportsTemperature).toBe(false)
+		expect(opus48.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+		// Pricing matches 4.7 (flat $5/$25, no long-context surcharge).
+		expect(opus48.inputPrice).toBe(5.0)
+		expect(opus48.outputPrice).toBe(25.0)
+		expect(opus48.cacheWritesPrice).toBe(6.25)
+		expect(opus48.cacheReadsPrice).toBe(0.5)
+	})
+
+	it("flags Opus 4.8 as a native-1M and adaptive-thinking model on Bedrock", () => {
+		// Native-1M membership ensures the runtime suppresses the legacy 1M beta header.
+		expect(BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS).toContain("anthropic.claude-opus-4-8")
+		// Adaptive-thinking membership ensures the runtime sends `thinking: { type: "adaptive" }`
+		// + `output_config.effort` instead of the legacy `budget_tokens` shape.
+		expect(BEDROCK_ADAPTIVE_THINKING_MODEL_IDS).toContain("anthropic.claude-opus-4-8")
+	})
+
+	it("registers Opus 4.8 for Global Inference but NOT the opt-in 1M dropdown", () => {
+		expect(BEDROCK_GLOBAL_INFERENCE_MODEL_IDS).toContain("anthropic.claude-opus-4-8")
+		// Opus 4.8 is 1M-by-default, so it must NOT appear in the opt-in 1M list -
+		// otherwise the dropdown would synthesise a redundant `:1m` twin alongside
+		// the already-1M base entry.
+		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-opus-4-8")
 	})
 })
 
