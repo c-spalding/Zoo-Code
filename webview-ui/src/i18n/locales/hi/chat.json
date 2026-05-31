@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "नया क्या है:",
-			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Zoo Code से कर सकें।",
-			"claudeOpus47": "Vertex AI पर Claude Opus 4.7: Anthropic के नवीनतम flagship reasoning मॉडल के लिए Vertex AI provider में Claude Opus 4.7 जोड़ा गया।",
-			"checkpointNav": "पिछले Checkpoint की Navigation: चैट में controls जोड़े गए ताकि आप पिछले checkpoints पर वापस जा सकें, पूर्ण i18n सपोर्ट के साथ।"
+			"highlight1": "Claude Opus 4.8 और Opencode Go: Anthropic, Bedrock और Vertex पर Claude Opus 4.8 जोड़ा गया, साथ ही Opencode Go को नए first-class provider के रूप में शामिल किया गया।",
+			"highlight2": "भरोसेमंद task cancellation: किसी task को cancel करने पर अब चल रहा process सही तरीके से बंद हो जाता है, और जिद्दी processes के लिए automatic Ctrl+C retry भी होता है।",
+			"highlight3": "Provider और editor fixes: Gemini के custom model IDs, Grok diff truncation, Windows पर PowerShell detection, और VS Code code action branding को ठीक किया गया।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

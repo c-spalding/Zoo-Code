@@ -25,9 +25,10 @@ import {
 	bedrockModels,
 	bedrockDefaultPromptRouterModelId,
 	BEDROCK_DEFAULT_TEMPERATURE,
+	BEDROCK_MAX_TOKENS,
+	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
-	BEDROCK_ADAPTIVE_THINKING_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
@@ -99,8 +100,21 @@ type BedrockAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max"
 type BedrockAdaptiveDisplay = "summarized" | "omitted"
 
 interface BedrockAdditionalModelFields {
-	thinking?: { type: "enabled"; budget_tokens: number } | { type: "adaptive"; display?: BedrockAdaptiveDisplay }
-	output_config?: { effort: BedrockAdaptiveEffort }
+	thinking?:
+		| {
+				type: "enabled"
+				budget_tokens: number
+		  }
+		| {
+				// Claude 4.7+ adaptive thinking — no budget_tokens, uses output_config.effort instead
+				type: "adaptive"
+				// "summarized" shows thinking content in UI; omit to keep thinking internal only
+				display?: BedrockAdaptiveDisplay
+		  }
+	output_config?: {
+		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
+		effort: BedrockAdaptiveEffort
+	}
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
@@ -376,7 +390,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		this.costModelConfig = this.getModel()
 
 		const clientConfig: BedrockRuntimeClientConfig = {
-			userAgentAppId: `RooCode#${Package.version}`,
+			userAgentAppId: `ZooCode#${Package.version}`,
 			region: this.options.awsRegion,
 			// Add the endpoint configuration when specified and enabled
 			...(this.options.awsBedrockEndpoint &&
@@ -465,7 +479,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		const config: BedrockClientConfig = {
-			userAgentAppId: `RooCode#${Package.version}`,
+			userAgentAppId: `ZooCode#${Package.version}`,
 			region: this.options.awsRegion,
 		}
 		if (this.options.awsUseApiKey && this.options.awsApiKey) {
@@ -497,6 +511,89 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			nextToken = response.nextToken
 		} while (nextToken)
 		return ids
+	}
+
+	/**
+	 * Detect models that require the adaptive-thinking API contract.
+	 *
+	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
+	 * in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
+	 * (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
+	 * `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
+	 * from 4.7 → 4.8 confirms there are no further breaking API changes, so a single
+	 * guard matches both generations. Shared by createMessage and completePrompt so
+	 * both request paths omit temperature for these models (sending it causes a 400).
+	 *
+	 * Accepts a model ID (with or without a cross-region/global prefix) and strips
+	 * the prefix via parseBaseModelId before matching.
+	 */
+	private isAdaptiveThinkingModel(modelId: string): boolean {
+		const baseModelId = this.parseBaseModelId(modelId)
+		return (
+			baseModelId.includes("opus-4-7") ||
+			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("sonnet-4-7") ||
+			baseModelId.includes("sonnet-4-8")
+		)
+	}
+
+	// Helper to guess model info from custom modelId string if not in bedrockModels
+	private guessModelInfoFromId(modelId: string): Partial<ModelInfo> {
+		// Define a mapping for model ID patterns and their configurations
+		const modelConfigMap: Record<string, Partial<ModelInfo>> = {
+			"claude-4": {
+				maxTokens: 8192,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+			"claude-3-7": {
+				maxTokens: 8192,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+			"claude-3-5": {
+				maxTokens: 8192,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+			"claude-4-opus": {
+				maxTokens: 4096,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+			"claude-3-opus": {
+				maxTokens: 4096,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+			"claude-3-haiku": {
+				maxTokens: 4096,
+				contextWindow: 200_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+			},
+		}
+
+		// Match the model ID to a configuration
+		const id = modelId.toLowerCase()
+		for (const [pattern, config] of Object.entries(modelConfigMap)) {
+			if (id.includes(pattern)) {
+				return config
+			}
+		}
+
+		// Default fallback
+		return {
+			maxTokens: BEDROCK_MAX_TOKENS,
+			contextWindow: BEDROCK_DEFAULT_CONTEXT,
+			supportsImages: false,
+			supportsPromptCache: false,
+		}
 	}
 
 	override async *createMessage(
@@ -549,9 +646,15 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Resolve the base model id first so the thinking branch can decide between the
 		// legacy budget_tokens payload and the newer adaptive + output_config.effort payload.
 		// parseBaseModelId strips cross-region inference prefixes (e.g. `us.`, `eu.`) and the
-		// synthetic `:1m` dropdown suffix.
+		// synthetic `:1m` dropdown suffix. It is also reused below for the 1M-context check.
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		const requiresAdaptiveThinking = BEDROCK_ADAPTIVE_THINKING_MODEL_IDS.includes(baseModelId as any)
+
+		// Detect models that require the adaptive-thinking API contract (Opus/Sonnet
+		// 4.7 and 4.8). See isAdaptiveThinkingModel for details. The same guard is
+		// reused in completePrompt so both request paths stay consistent. This is the
+		// canonical adaptive gate (broader substring match than the legacy
+		// BEDROCK_ADAPTIVE_THINKING_MODEL_IDS list and shared with completePrompt).
+		const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
 
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
@@ -566,7 +669,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			thinkingEnabled = true
 			const effectiveBudget = metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096
 
-			if (requiresAdaptiveThinking) {
+			if (isAdaptiveThinkingModel) {
 				// Newer Claude models on Bedrock (e.g. Opus 4.7) reject the legacy
 				// `thinking: { type: "enabled", budget_tokens: N }` shape with:
 				//   invalid_request_error: "thinking.type.enabled" is not supported for this model.
@@ -616,11 +719,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-			// Use modelConfig.temperature directly. The model-params layer sets it to
-			// undefined when the model has supportsTemperature: false (e.g. Claude Opus
-			// 4.7 on Bedrock), so do NOT fall back to options.modelTemperature here -
-			// that would silently re-introduce a value the model rejects.
-			temperature: modelConfig.temperature,
+			// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
+			// sending temperature causes a 400 error. For all other models we use
+			// modelConfig.temperature (the model-params layer already sets it to
+			// undefined when supportsTemperature is false), falling back to the
+			// user's modelTemperature option when present.
+			...(isAdaptiveThinkingModel
+				? {}
+				: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models.
@@ -1074,9 +1180,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-				// Use modelConfig.temperature directly - see createMessage for rationale.
-				// Models with supportsTemperature: false (e.g. Opus 4.7) need this omitted.
-				temperature: modelConfig.temperature,
+				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
+				// sending temperature causes a 400 error. Guard the non-stream path the
+				// same way createMessage does so completePrompt also works for these models.
+				...(this.isAdaptiveThinkingModel(modelConfig.id)
+					? {}
+					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 			}
 
 			// For completePrompt, use a unique conversation ID based on the prompt

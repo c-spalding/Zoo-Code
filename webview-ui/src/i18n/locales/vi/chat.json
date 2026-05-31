@@ -337,10 +337,10 @@
 			"readMore": "Xem trang chủ mới của Zoo Code và đọc toàn bộ thông báo"
 		},
 		"release": {
-			"heading": "Tính năng mới:",
-			"gpt55": "GPT-5.5 qua OpenAI Codex: Đã thêm hỗ trợ GPT-5.5 trong nhà cung cấp OpenAI Codex để bạn có thể dùng model mới nhất trực tiếp từ Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 trên Vertex AI: Đã thêm Claude Opus 4.7 vào nhà cung cấp Vertex AI - model reasoning flagship mới nhất của Anthropic.",
-			"checkpointNav": "Điều hướng Checkpoint trước đó: Đã thêm các điều khiển trong chat để quay lại các checkpoint trước, với hỗ trợ i18n đầy đủ."
+			"heading": "Có gì mới:",
+			"highlight1": "Claude Opus 4.8 và Opencode Go: Đã thêm Claude Opus 4.8 cho Anthropic, Bedrock và Vertex, cùng với Opencode Go là provider hạng nhất mới.",
+			"highlight2": "Hủy tác vụ đáng tin cậy: Hủy tác vụ giờ sẽ kết thúc đúng tiến trình đang chạy, với tính năng tự động thử lại Ctrl+C cho các tiến trình khó dừng.",
+			"highlight3": "Sửa lỗi provider và editor: Đã sửa ID model tùy chỉnh của Gemini, lỗi cắt ngắn diff của Grok, phát hiện PowerShell trên Windows và tên code action của VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",
