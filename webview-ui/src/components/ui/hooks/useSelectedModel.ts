@@ -181,6 +181,18 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case "bedrock": {
+			// Custom ARN special-case (restores upstream PR #11373 behaviour).
+			// Detect either a real ARN string (awsCustomArn) or the "custom-arn" sentinel
+			// used by apiModelId. This must short-circuit BEFORE resolveBedrockModelInfo()
+			// so the generic unrecognised-id fallback (which borrows Sonnet 4-5's shape) is
+			// left untouched. Custom ARNs default capabilities ON.
+			if (apiConfiguration.awsCustomArn || apiConfiguration.apiModelId === "custom-arn") {
+				const id = apiConfiguration.apiModelId ?? defaultModelId
+				return {
+					id,
+					info: { maxTokens: 5000, contextWindow: 128_000, supportsPromptCache: true, supportsImages: true },
+				}
+			}
 			const targetId =
 				apiConfiguration.awsCustomArn ||
 				apiConfiguration.awsBedrockInvokeTarget ||
