@@ -540,6 +540,39 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-arn")
 			expect(result.current.info?.supportsImages).toBe(true)
 		})
+
+		it("should preserve an unrecognised non-ARN bedrock id and borrow the default model info shape without applying custom-ARN capability defaults", () => {
+			// An unrecognised model id that is NOT the "custom-arn" sentinel and has NO awsCustomArn.
+			// This exercises the generic fallback in resolveBedrockModelInfo() which:
+			// 1. Borrows the default model (Sonnet 4-5) info SHAPE
+			// 2. Does NOT swap the id to the default - user's id is PRESERVED
+			// 3. Does NOT inherit custom-ARN true/true capabilities
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "bedrock",
+				apiModelId: "some-unknown-model",
+				// Note: no awsCustomArn set
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// 1. The id is PRESERVED as user's id (not swapped to default Sonnet 4-5 id)
+			expect(result.current.id).toBe("some-unknown-model")
+
+			// 2. The info reflects the default model shape with unrecognised-id fallback overlay.
+			// Default model (Sonnet 4-5) has: maxTokens=64000, contextWindow=200000, supportsImages=true, supportsPromptCache=true
+			// BUT guessBedrockModelInfoFromId("some-unknown-model") returns false/false because it matches no claude pattern.
+			// So the fallback yields:
+			// - maxTokens: BEDROCK_MAX_TOKENS = 4096 (from guessBedrockModelInfoFromId default)
+			// - contextWindow: BEDROCK_DEFAULT_CONTEXT = 128000 (from guessBedrockModelInfoFromId default)
+			// - supportsImages: false (from guessBedrockModelInfoFromId default)
+			// - supportsPromptCache: false (from guessBedrockModelInfoFromId default)
+			// This proves custom-ARN true/true did NOT leak into the generic fallback path.
+			expect(result.current.info?.maxTokens).toBe(4096)
+			expect(result.current.info?.contextWindow).toBe(128_000)
+			expect(result.current.info?.supportsImages).toBe(false)
+			expect(result.current.info?.supportsPromptCache).toBe(false)
+		})
 	})
 
 	describe("litellm provider", () => {
