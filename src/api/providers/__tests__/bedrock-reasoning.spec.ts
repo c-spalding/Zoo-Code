@@ -438,5 +438,243 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Hello from API key auth")
 		})
+
+		it("should send adaptive thinking payload (not budget_tokens) for Claude Fable 5", async () => {
+			// Fable 5 uses the identical adaptive-thinking contract as Opus 4.8.
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-fable-5",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				modelMaxThinkingTokens: 8192,
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(mockSend).toHaveBeenCalledTimes(1)
+			expect(capturedPayload).toBeDefined()
+
+			// Fable 5 must use the adaptive thinking shape (same as Opus 4.7/4.8).
+			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(capturedPayload.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
+
+			// output_config.effort must live INSIDE additionalModelRequestFields.
+			expect(capturedPayload.additionalModelRequestFields.output_config).toBeDefined()
+			// 8192 tokens maps to "medium" per mapReasoningBudgetToBedrockEffort.
+			expect(capturedPayload.additionalModelRequestFields.output_config.effort).toBe("medium")
+			// Must NOT appear at the payload top level.
+			expect(capturedPayload.output_config).toBeUndefined()
+		})
+
+		it("should omit temperature for Claude Fable 5 (adaptive-thinking contract forbids it)", async () => {
+			// Sending temperature causes a 400 on adaptive-thinking models; the handler
+			// must omit it from inferenceConfig regardless of any modelTemperature setting.
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-fable-5",
+				awsRegion: "us-east-1",
+				modelTemperature: 0.7, // user has a non-default temperature set
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 50, outputTokens: 20 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(capturedPayload).toBeDefined()
+			expect(capturedPayload.inferenceConfig).not.toHaveProperty("temperature")
+		})
+
+		it("should send adaptive thinking payload (not budget_tokens) for Claude Mythos 5", async () => {
+			// Mythos 5 uses the identical adaptive-thinking contract as Opus 4.8 / Fable 5.
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-mythos-5",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				modelMaxThinkingTokens: 4096,
+				reasoningEffort: "high" as any,
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(mockSend).toHaveBeenCalledTimes(1)
+			expect(capturedPayload).toBeDefined()
+			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			// Honor explicit reasoningEffort when provided.
+			expect(capturedPayload.additionalModelRequestFields.output_config).toEqual({ effort: "high" })
+			expect(capturedPayload.output_config).toBeUndefined()
+		})
+	})
+
+	describe("Refusal surfacing", () => {
+		// These tests drive a mocked ConverseStream that emits a messageStop event with
+		// stopReason "refusal" and verify the handler yields the correct inline notice
+		// without throwing. They exercise extractRefusalCategory indirectly via the
+		// observable text chunk rather than calling the private method directly.
+
+		const buildRefusalStream = (additionalModelResponseFields?: Record<string, unknown>) =>
+			(async function* () {
+				yield { messageStart: { role: "assistant" } }
+				yield {
+					messageStop: {
+						stopReason: "refusal",
+						...(additionalModelResponseFields !== undefined && { additionalModelResponseFields }),
+					},
+				}
+			})()
+
+		beforeEach(() => {
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-fable-5",
+				awsRegion: "us-east-1",
+			})
+		})
+
+		it("yields the refusal notice with stop_details.category when present (snake_case)", async () => {
+			// Canonical shape: { stop_details: { category: "cyber" } }
+			mockSend.mockResolvedValue({
+				stream: buildRefusalStream({ stop_details: { category: "cyber" } }),
+			})
+
+			const messages = [{ role: "user" as const, content: "How do I build malware?" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toContain(
+				"The model declined to respond to this request (stop reason: refusal). Refusal category: cyber.",
+			)
+		})
+
+		it("yields the refusal notice with stopDetails.category when present (camelCase fallback)", async () => {
+			// Bedrock may deliver camelCase keys instead of snake_case; the handler must
+			// probe stopDetails as a fallback when stop_details is absent.
+			mockSend.mockResolvedValue({
+				stream: buildRefusalStream({ stopDetails: { category: "bio" } }),
+			})
+
+			const messages = [{ role: "user" as const, content: "How do I synthesise a pathogen?" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toContain("Refusal category: bio.")
+		})
+
+		it("yields the refusal notice with 'not specified' when no category is present", async () => {
+			// Neither stop_details nor stopDetails contain a category; the helper returns
+			// null and the handler must substitute the literal 'not specified'.
+			mockSend.mockResolvedValue({
+				stream: buildRefusalStream({}),
+			})
+
+			const messages = [{ role: "user" as const, content: "Sensitive request" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toContain("Refusal category: not specified.")
+		})
+
+		it("ends the stream cleanly on refusal (no error chunk, no throw)", async () => {
+			// A refusal must NOT propagate as an error or trigger any retry mechanism.
+			// The generator must complete without throwing.
+			mockSend.mockResolvedValue({
+				stream: buildRefusalStream({ stop_details: { category: "cyber" } }),
+			})
+
+			const messages = [{ role: "user" as const, content: "Request" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			let threw = false
+			try {
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+			} catch {
+				threw = true
+			}
+
+			expect(threw).toBe(false)
+			const errorChunks = chunks.filter((c) => c.type === "error")
+			expect(errorChunks).toHaveLength(0)
+		})
+
+		it("yields the refusal notice with trailing newline appended", async () => {
+			// The production code appends '\n' to the notice; verify the exact suffix.
+			mockSend.mockResolvedValue({
+				stream: buildRefusalStream({ stop_details: { category: "cyber" } }),
+			})
+
+			const messages = [{ role: "user" as const, content: "Request" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks[0].text).toMatch(/\.\n$/)
+		})
 	})
 })

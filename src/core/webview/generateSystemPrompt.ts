@@ -20,11 +20,6 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		enableSubfolderRules,
 	} = await provider.getState()
 
-	// Combine global custom instructions with per-profile instructions.
-	// Both are optional; either or both can contribute to the system prompt.
-	const combinedCustomInstructions =
-		[customInstructions, apiConfiguration?.customInstructions].filter(Boolean).join("\n\n") || undefined
-
 	const diffStrategy = new MultiSearchReplaceDiffStrategy()
 
 	const cwd = provider.cwd
@@ -53,7 +48,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		mode,
 		customModePrompts,
 		customModes,
-		combinedCustomInstructions,
+		customInstructions,
 		experiments,
 		language,
 		rooIgnoreInstructions,
@@ -66,6 +61,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 				.get<boolean>("newTaskRequireTodos", false),
 			isStealthModel: modelInfo?.isStealthModel,
 			allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
+			profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
 		},
 		undefined, // todoList
 		undefined, // modelId

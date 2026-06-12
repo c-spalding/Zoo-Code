@@ -4,8 +4,8 @@ describe("getSharedToolUseSection", () => {
 	it("should include native tool-calling preference", () => {
 		const section = getSharedToolUseSection()
 
-		expect(section).toContain("Prefer the provider-native tool-calling mechanism when available")
-		expect(section).toContain("Do not include XML markup when using native tool-calling")
+		expect(section).toContain("Use the provider-native tool-calling mechanism")
+		expect(section).toContain("Do not include XML markup or examples")
 	})
 
 	it("should include multiple tools per message guidance", () => {

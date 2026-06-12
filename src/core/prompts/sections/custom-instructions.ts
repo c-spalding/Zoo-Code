@@ -451,6 +451,14 @@ export async function addCustomInstructions(
 		sections.push(`Global Instructions:\n${globalCustomInstructions.trim()}`)
 	}
 
+	// Add per-profile instructions after global but before mode-specific. These come
+	// from the active provider profile (`profileCustomInstructions`) and are rendered
+	// under their own heading so they are distinct from the global instructions above.
+	const profileCustomInstructions = options.settings?.profileCustomInstructions
+	if (typeof profileCustomInstructions === "string" && profileCustomInstructions.trim()) {
+		sections.push(`Profile Instructions:\n${profileCustomInstructions.trim()}`)
+	}
+
 	// Add mode-specific instructions after
 	if (typeof modeCustomInstructions === "string" && modeCustomInstructions.trim()) {
 		sections.push(`Mode-specific Instructions:\n${modeCustomInstructions.trim()}`)

@@ -101,6 +101,76 @@ describe("Bedrock model catalog", () => {
 		// the already-1M base entry.
 		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-opus-4-8")
 	})
+
+	it("includes Claude Fable 5 with 1M context as the default (no opt-in tier) and doubled pricing vs Opus 4.8", () => {
+		const fable5 = bedrockModels["anthropic.claude-fable-5" as keyof typeof bedrockModels] as ModelInfo
+		expect(fable5).toBeDefined()
+		// Fable 5 serves the full 1M context by default; no 200K base / 1M tier split.
+		expect(fable5.contextWindow).toBe(1_000_000)
+		expect(fable5.tiers).toBeUndefined()
+		// Mirrors Opus 4.8 max output cap.
+		expect(fable5.maxTokens).toBe(128_000)
+		// Same adaptive-thinking feature set as Opus 4.8.
+		expect(fable5.supportsReasoningBudget).toBe(true)
+		expect(fable5.supportsTemperature).toBe(false)
+		expect(fable5.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+		// Cache parameters identical to Opus 4.8.
+		expect(fable5.minTokensPerCachePoint).toBe(1024)
+		// Pricing is DOUBLED vs Opus 4.8 ($5/$25 -> $10/$50; $6.25/$0.5 -> $12.5/$1.0).
+		expect(fable5.inputPrice).toBe(10.0)
+		expect(fable5.outputPrice).toBe(50.0)
+		expect(fable5.cacheWritesPrice).toBe(12.5)
+		expect(fable5.cacheReadsPrice).toBe(1.0)
+	})
+
+	it("flags Fable 5 as a native-1M and adaptive-thinking model on Bedrock", () => {
+		// Native-1M membership ensures the runtime suppresses the legacy 1M beta header.
+		expect(BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS).toContain("anthropic.claude-fable-5")
+		// Adaptive-thinking membership ensures the runtime sends `thinking: { type: "adaptive" }`
+		// + `output_config.effort` instead of the legacy `budget_tokens` shape.
+		expect(BEDROCK_ADAPTIVE_THINKING_MODEL_IDS).toContain("anthropic.claude-fable-5")
+	})
+
+	it("registers Fable 5 for Global Inference but NOT the opt-in 1M dropdown", () => {
+		expect(BEDROCK_GLOBAL_INFERENCE_MODEL_IDS).toContain("anthropic.claude-fable-5")
+		// Fable 5 is 1M-by-default, so it must NOT appear in the opt-in 1M list.
+		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-fable-5")
+	})
+
+	it("includes Claude Mythos 5 with 1M context as the default (no opt-in tier) and doubled pricing vs Opus 4.8", () => {
+		const mythos5 = bedrockModels["anthropic.claude-mythos-5" as keyof typeof bedrockModels] as ModelInfo
+		expect(mythos5).toBeDefined()
+		// Mythos 5 serves the full 1M context by default; no 200K base / 1M tier split.
+		expect(mythos5.contextWindow).toBe(1_000_000)
+		expect(mythos5.tiers).toBeUndefined()
+		// Mirrors Opus 4.8 max output cap.
+		expect(mythos5.maxTokens).toBe(128_000)
+		// Same adaptive-thinking feature set as Opus 4.8.
+		expect(mythos5.supportsReasoningBudget).toBe(true)
+		expect(mythos5.supportsTemperature).toBe(false)
+		expect(mythos5.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+		// Cache parameters identical to Opus 4.8.
+		expect(mythos5.minTokensPerCachePoint).toBe(1024)
+		// Pricing is DOUBLED vs Opus 4.8 ($5/$25 -> $10/$50; $6.25/$0.5 -> $12.5/$1.0).
+		expect(mythos5.inputPrice).toBe(10.0)
+		expect(mythos5.outputPrice).toBe(50.0)
+		expect(mythos5.cacheWritesPrice).toBe(12.5)
+		expect(mythos5.cacheReadsPrice).toBe(1.0)
+	})
+
+	it("flags Mythos 5 as a native-1M and adaptive-thinking model on Bedrock", () => {
+		// Native-1M membership ensures the runtime suppresses the legacy 1M beta header.
+		expect(BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS).toContain("anthropic.claude-mythos-5")
+		// Adaptive-thinking membership ensures the runtime sends `thinking: { type: "adaptive" }`
+		// + `output_config.effort` instead of the legacy `budget_tokens` shape.
+		expect(BEDROCK_ADAPTIVE_THINKING_MODEL_IDS).toContain("anthropic.claude-mythos-5")
+	})
+
+	it("registers Mythos 5 for Global Inference but NOT the opt-in 1M dropdown", () => {
+		expect(BEDROCK_GLOBAL_INFERENCE_MODEL_IDS).toContain("anthropic.claude-mythos-5")
+		// Mythos 5 is 1M-by-default, so it must NOT appear in the opt-in 1M list.
+		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-mythos-5")
+	})
 })
 
 describe("resolveBedrockModelInfo", () => {

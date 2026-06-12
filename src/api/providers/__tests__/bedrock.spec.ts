@@ -1679,6 +1679,25 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
+
+			it("returns true for Fable 5 and Mythos 5 bare ids", () => {
+				// Fable 5 and Mythos 5 are the GA and access-gated successors to Opus 4.8.
+				// Their non-numeric name segments require explicit substring guards in
+				// isAdaptiveThinkingModel rather than being caught by the opus/sonnet-4-x
+				// numeric patterns.
+				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-mythos-5")).toBe(true)
+			})
+
+			it("returns true for Fable 5 and Mythos 5 with cross-region and global prefixes", () => {
+				// The handler strips cross-region / global prefixes via parseBaseModelId before
+				// matching, so prefixed ids must also resolve to true.
+				expect(isAdaptiveThinkingModel("us.anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("eu.anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("us.anthropic.claude-mythos-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-mythos-5")).toBe(true)
+			})
 		})
 	})
 })

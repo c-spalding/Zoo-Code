@@ -20,4 +20,10 @@ export interface SystemPromptSettings {
 	 * open-weight models via Bedrock that do not support native function-calling.
 	 */
 	textToolCallFallback?: boolean
+	/**
+	 * Per-profile custom instructions for the active provider profile. Kept separate
+	 * from the global custom instructions so the two can be rendered under distinct
+	 * headings without colliding (see provider-settings `profileCustomInstructions`).
+	 */
+	profileCustomInstructions?: string
 }

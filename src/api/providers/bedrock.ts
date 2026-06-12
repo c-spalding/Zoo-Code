@@ -262,7 +262,12 @@ export interface StreamEvent {
 		role?: string
 	}
 	messageStop?: {
-		stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence"
+		// The AWS SDK StopReason enum (v3.922.0) lists: end_turn, tool_use, max_tokens,
+		// stop_sequence, content_filtered, guardrail_intervened,
+		// model_context_window_exceeded. It does NOT yet include "refusal", which Claude
+		// on Bedrock delivers as a raw string outside the enum. We therefore keep this
+		// union permissive so the handler can match the literal "refusal" at runtime.
+		stopReason?: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal" | string
 		additionalModelResponseFields?: Record<string, unknown>
 	}
 	contentBlockStart?: ContentBlockStartEvent
@@ -520,9 +525,15 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
 	 * (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
 	 * `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
-	 * from 4.7 → 4.8 confirms there are no further breaking API changes, so a single
+	 * from 4.7 to 4.8 confirms there are no further breaking API changes, so a single
 	 * guard matches both generations. Shared by createMessage and completePrompt so
 	 * both request paths omit temperature for these models (sending it causes a 400).
+	 *
+	 * Fable 5 and Mythos 5 are the GA and access-gated successors to Opus 4.8. They
+	 * use the identical adaptive-thinking contract (always-on adaptive thinking,
+	 * output_config.effort, no sampling parameters). Their model IDs do not follow
+	 * the opus/sonnet-4-x numeric pattern, so they require explicit substring matches
+	 * rather than being caught by the numeric guards above.
 	 *
 	 * Accepts a model ID (with or without a cross-region/global prefix) and strips
 	 * the prefix via parseBaseModelId before matching.
@@ -533,8 +544,42 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
 			baseModelId.includes("sonnet-4-7") ||
-			baseModelId.includes("sonnet-4-8")
+			baseModelId.includes("sonnet-4-8") ||
+			// Fable 5 / Mythos 5: GA and access-gated successors to Opus 4.8 that use
+			// the same adaptive-thinking contract but have non-numeric name segments.
+			baseModelId.includes("fable-5") ||
+			baseModelId.includes("mythos-5")
 		)
+	}
+
+	/**
+	 * Extract the refusal category from a messageStop additionalModelResponseFields
+	 * object. Claude on Bedrock surfaces model-specific stop metadata under
+	 * additionalModelResponseFields as a free-form document (AWS SDK __DocumentType).
+	 * The Anthropic API documents stop_details.category with values "cyber", "bio",
+	 * "reasoning_extraction", or null, but the exact key casing on the Bedrock Converse
+	 * path is unverified. We therefore probe both snake_case and camelCase variants and
+	 * fall back to a top-level "category" key before returning null.
+	 *
+	 * Returns the category string when found, or null when absent or not a string.
+	 */
+	private extractRefusalCategory(fields: Record<string, unknown>): string | null {
+		// Probe nested stop_details / stopDetails objects first (expected canonical shape).
+		const nested =
+			(fields["stop_details"] as Record<string, unknown> | undefined) ??
+			(fields["stopDetails"] as Record<string, unknown> | undefined)
+		if (nested && typeof nested === "object") {
+			const cat = nested["category"]
+			if (typeof cat === "string" && cat.length > 0) {
+				return cat
+			}
+		}
+		// Fall back to a top-level "category" key.
+		const topLevel = fields["category"]
+		if (typeof topLevel === "string" && topLevel.length > 0) {
+			return topLevel
+		}
+		return null
 	}
 
 	// Helper to guess model info from custom modelId string if not in bedrockModels
@@ -1102,6 +1147,26 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 				// Handle message stop
 				if (streamEvent.messageStop) {
+					// A stopReason of "refusal" means the model declined the request on safety
+					// grounds and returned HTTP 200. This is NOT an error and must NOT trigger
+					// retry logic. We surface a readable inline notice and continue to let the
+					// stream finalise normally.
+					if (streamEvent.messageStop.stopReason === "refusal") {
+						const fields = streamEvent.messageStop.additionalModelResponseFields ?? {}
+						const category = this.extractRefusalCategory(fields)
+						const categoryText =
+							typeof category === "string" && category.length > 0 ? category : "not specified"
+						const notice =
+							`The model declined to respond to this request (stop reason: refusal). ` +
+							`Refusal category: ${categoryText}.`
+						logger.info(notice, {
+							ctx: "bedrock",
+							modelId: modelConfig.id,
+							stopReason: "refusal",
+							refusalCategory: categoryText,
+						})
+						yield { type: "text", text: notice + "\n" }
+					}
 					continue
 				}
 			}

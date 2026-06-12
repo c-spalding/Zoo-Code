@@ -257,6 +257,73 @@ export const bedrockModels = {
 		cachableFields: ["system", "messages", "tools"],
 		description: "Claude Opus 4.8 - most capable Opus model for agentic coding (native 1M context, default)",
 	},
+	"anthropic.claude-fable-5": {
+		// Fable 5 is the GA successor to Opus 4.8. Per the Anthropic migration guide
+		// (https://platform.claude.com/docs/en/about-claude/models/migration-guide)
+		// it is a near-drop-in replacement with the following key changes:
+		//   - 1M token context window is the DEFAULT (no opt-in, no beta header)
+		//   - 128k max output tokens (same as 4.8)
+		//   - Adaptive thinking is ALWAYS ON and cannot be disabled
+		//   - Effort default is "high"
+		//   - Pricing DOUBLES to $10/$50 per MTok input/output
+		//   - Prompt-cache minimum stays 1,024 tokens (same as 4.8)
+		// We therefore set contextWindow to 1M directly and exclude this model from
+		// BEDROCK_1M_CONTEXT_MODEL_IDS (the opt-in dropdown) for the same reason as 4.8.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		// Fable 5 inherits the 4.7/4.8 adaptive-thinking effort surface unchanged.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		// Fable 5 inherits the 4.8 sampling-parameter rejection: temperature, top_p,
+		// and top_k at non-default values return a 400. The model-params layer honors
+		// this flag by suppressing temperature in the Bedrock inferenceConfig.
+		supportsTemperature: false,
+		// Pricing doubles relative to Opus 4.8. The 1M context window does NOT incur
+		// an additional long-context surcharge.
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 1.0,
+		// Prompt-cache minimum unchanged from 4.8 at 1,024 tokens. 4-point cap
+		// maintained for parity with the rest of the Anthropic-on-Bedrock entries.
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description: "Claude Fable 5 - Anthropic's most capable widely released model (native 1M context, default)",
+	},
+	"anthropic.claude-mythos-5": {
+		// Mythos 5 is the access-gated frontier successor in the same generation as
+		// Fable 5. It uses the identical Bedrock API contract as Fable 5 / Opus 4.8:
+		// adaptive thinking always on, 1M default context, 128k max output, same
+		// pricing tier. Per the Anthropic migration guide the effort surface and
+		// prompt-cache parameters are unchanged relative to Fable 5.
+		//
+		// NOTE: The Bedrock model ID "anthropic.claude-mythos-5" and the availability
+		// of this model on AWS Bedrock are UNVERIFIED. Confirm the exact model ID
+		// against the AWS console before relying on this entry in production. The
+		// properties below are based on the Anthropic migration guide and parity with
+		// Fable 5; adjust if AWS surfaces different values.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		// Same effort surface as Fable 5 and Opus 4.8.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		// Inherits the Fable 5 / Opus 4.8 sampling-parameter rejection.
+		supportsTemperature: false,
+		// Pricing matches Fable 5 (double the Opus 4.8 rate).
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 1.0,
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description: "Claude Mythos 5 - access-gated frontier model (native 1M context, default)",
+	},
 	"anthropic.claude-opus-4-5-20251101-v1:0": {
 		// Mirrors anthropic-direct cap; AWS Bedrock accepts the same upstream maximum.
 		maxTokens: 32_000,
@@ -639,10 +706,16 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // See: https://github.com/continuedev/continue/pull/11969 for the Bedrock validation
 // behavior that surfaced this issue.
 //
-// Opus 4.8 also belongs here even though it isn't in BEDROCK_1M_CONTEXT_MODEL_IDS:
-// its 1M context is the DEFAULT (always on), so there's no opt-in tier dropdown,
-// but the Bedrock runtime still must avoid sending the legacy 1M beta header.
-export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = ["anthropic.claude-opus-4-7", "anthropic.claude-opus-4-8"] as const
+// Opus 4.8, Fable 5, and Mythos 5 also belong here even though they are not in
+// BEDROCK_1M_CONTEXT_MODEL_IDS: their 1M context is the DEFAULT (always on), so there
+// is no opt-in tier dropdown, but the Bedrock runtime still must avoid sending the
+// legacy 1M beta header AND the fine-grained-tool-streaming beta.
+export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = [
+	"anthropic.claude-opus-4-7",
+	"anthropic.claude-opus-4-8",
+	"anthropic.claude-fable-5",
+	"anthropic.claude-mythos-5",
+] as const
 
 // Models that REJECT the legacy `thinking: { type: "enabled", budget_tokens: N }` payload
 // on the Bedrock Converse API and instead require the newer adaptive thinking format:
@@ -652,7 +725,14 @@ export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = ["anthropic.claude-opus-4-7",
 // Attempting to send the legacy shape results in:
 //   invalid_request_error: "thinking.type.enabled" is not supported for this model.
 //   Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
-export const BEDROCK_ADAPTIVE_THINKING_MODEL_IDS = ["anthropic.claude-opus-4-7", "anthropic.claude-opus-4-8"] as const
+//
+// Fable 5 and Mythos 5 use the identical adaptive-thinking contract as Opus 4.8.
+export const BEDROCK_ADAPTIVE_THINKING_MODEL_IDS = [
+	"anthropic.claude-opus-4-7",
+	"anthropic.claude-opus-4-8",
+	"anthropic.claude-fable-5",
+	"anthropic.claude-mythos-5",
+] as const
 
 // Previously Claude 4.6 Sonnet/Opus auto-advertised 1M. With the new dual dropdown
 // (default-context + `:1m` variant) the UI always exposes both tiers explicitly, so
@@ -1095,6 +1175,8 @@ export const resolveBedrockModelInfo = ({
 // - Claude Opus 4.6
 // - Claude Opus 4.7
 // - Claude Opus 4.8
+// - Claude Fable 5
+// - Claude Mythos 5 (unverified - confirm model ID against AWS console before use)
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -1104,6 +1186,8 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-4-6-v1",
 	"anthropic.claude-opus-4-7",
 	"anthropic.claude-opus-4-8",
+	"anthropic.claude-fable-5",
+	"anthropic.claude-mythos-5",
 ] as const
 
 // Amazon Bedrock Service Tier types

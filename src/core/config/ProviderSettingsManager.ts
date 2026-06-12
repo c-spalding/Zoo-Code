@@ -46,6 +46,7 @@ export const providerProfilesSchema = z.object({
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
 			routerProviderMigrated: z.boolean().optional(),
+			profileCustomInstructionsMigrated: z.boolean().optional(),
 		})
 		.optional(),
 })
@@ -71,6 +72,7 @@ export class ProviderSettingsManager {
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 			routerProviderMigrated: true, // Mark as migrated on fresh installs
+			profileCustomInstructionsMigrated: true, // Mark as migrated on fresh installs
 		},
 	}
 
@@ -144,6 +146,7 @@ export class ProviderSettingsManager {
 						todoListEnabledMigrated: false,
 						claudeCodeLegacySettingsMigrated: false,
 						routerProviderMigrated: false,
+						profileCustomInstructionsMigrated: false,
 					} // Initialize with default values
 					isDirty = true
 				}
@@ -198,6 +201,16 @@ export class ProviderSettingsManager {
 					}
 
 					providerProfiles.migrations.claudeCodeLegacySettingsMigrated = true
+					isDirty = true
+				}
+
+				if (!providerProfiles.migrations.profileCustomInstructionsMigrated) {
+					// `load()` has already renamed the legacy per-profile
+					// `customInstructions` key to `profileCustomInstructions` in memory.
+					// Forcing a persisted rewrite here removes the legacy key from the
+					// stored JSON so it does not linger. Marking the flag ensures this
+					// runs only once.
+					providerProfiles.migrations.profileCustomInstructionsMigrated = true
 					isDirty = true
 				}
 
@@ -622,9 +635,17 @@ export class ProviderSettingsManager {
 
 			const apiConfigs = Object.entries(providerProfiles.apiConfigs).reduce(
 				(acc, [key, apiConfig]) => {
+					// Rename the legacy per-profile `customInstructions` key to
+					// `profileCustomInstructions` on the raw object BEFORE strict parsing.
+					// The provider schema no longer knows `customInstructions`, so a strict
+					// parse would silently strip it and lose the user's value. Doing the
+					// rename here preserves it. The persisted rewrite is handled separately
+					// (flag-gated) in `migrateProfileCustomInstructions`.
+					const renamedConfig = this.renameLegacyProfileCustomInstructions(apiConfig)
+
 					// First, sanitize invalid apiProvider values before parsing
 					// This handles removed providers (like "glama") gracefully
-					const sanitizedConfig = this.sanitizeProviderConfig(apiConfig)
+					const sanitizedConfig = this.sanitizeProviderConfig(renamedConfig)
 
 					// For retired providers, use passthrough() to preserve legacy
 					// provider-specific fields (e.g. groqApiKey, deepInfraModelId)
@@ -693,6 +714,39 @@ export class ProviderSettingsManager {
 		}
 
 		return apiConfig
+	}
+
+	/**
+	 * Renames the legacy per-profile `customInstructions` key to
+	 * `profileCustomInstructions` on a raw (unparsed) config object.
+	 *
+	 * Historically the per-profile instructions field shared the key name
+	 * `customInstructions` with the global setting, which collided in the flat
+	 * global-state store and duplicated the text in the system prompt. The field
+	 * was renamed; this preserves any previously-saved profile value.
+	 *
+	 * If `profileCustomInstructions` already holds a value it is left untouched
+	 * (no clobbering) and the legacy key is simply dropped. Returns a new object
+	 * only when a change is needed; otherwise returns the input unchanged.
+	 */
+	private renameLegacyProfileCustomInstructions(apiConfig: unknown): unknown {
+		if (typeof apiConfig !== "object" || apiConfig === null) {
+			return apiConfig
+		}
+
+		const config = apiConfig as Record<string, unknown>
+
+		if (!("customInstructions" in config)) {
+			return apiConfig
+		}
+
+		const { customInstructions: legacyValue, ...rest } = config
+
+		// Only adopt the legacy value if the new key has nothing meaningful yet.
+		const hasNewValue =
+			typeof rest.profileCustomInstructions === "string" && rest.profileCustomInstructions.length > 0
+
+		return hasNewValue ? rest : { ...rest, profileCustomInstructions: legacyValue }
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {

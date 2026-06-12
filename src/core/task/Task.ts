@@ -4051,11 +4051,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const modelInfo = this.api.getModel().info
 
-			// Combine global custom instructions with per-profile instructions.
-			// Both are optional; either or both can contribute to the system prompt.
-			const combinedCustomInstructions =
-				[customInstructions, apiConfiguration?.customInstructions].filter(Boolean).join("\n\n") || undefined
-
+			// Global custom instructions and per-profile instructions are kept
+			// separate so the system prompt can render them under distinct headings.
+			// The global value is passed as `globalCustomInstructions`; the active
+			// profile's value is passed via `settings.profileCustomInstructions`.
 			return SYSTEM_PROMPT(
 				provider.context,
 				this.cwd,
@@ -4065,7 +4064,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode ?? defaultModeSlug,
 				customModePrompts,
 				customModes,
-				combinedCustomInstructions,
+				customInstructions,
 				experiments,
 				language,
 				rooIgnoreInstructions,
@@ -4080,6 +4079,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					isStealthModel: modelInfo?.isStealthModel,
 					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 					textToolCallFallback: apiConfiguration?.textToolCallFallback,
+					profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
 				},
 				undefined, // todoList
 				this.api.getModel().id,

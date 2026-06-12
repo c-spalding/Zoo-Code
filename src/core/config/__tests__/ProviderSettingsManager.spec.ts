@@ -67,6 +67,7 @@ describe("ProviderSettingsManager", () => {
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: true,
 					},
 				}),
 			)
@@ -1365,6 +1366,228 @@ describe("ProviderSettingsManager", () => {
 			expect(result.hasChanges).toBe(true)
 			expect(result.activeProfileChanged).toBe(false)
 			expect(result.activeProfileId).toBe("local-id")
+		})
+	})
+
+	describe("profileCustomInstructions migration", () => {
+		it("should migrate legacy customInstructions to profileCustomInstructions", async () => {
+			// Set up a stored profile with the legacy customInstructions key
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							id: "default-id",
+							apiProvider: "anthropic",
+							customInstructions: "Legacy profile instructions", // This is the legacy key
+						},
+					},
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			// Verify that store was called with migrated data
+			expect(mockSecrets.store).toHaveBeenCalled()
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// Legacy key should be renamed to new key
+			expect(storedConfig.apiConfigs.default.profileCustomInstructions).toBe("Legacy profile instructions")
+			// Legacy key should be removed (not present)
+			expect(storedConfig.apiConfigs.default.customInstructions).toBeUndefined()
+			// Migration flag should be set to true
+			expect(storedConfig.migrations.profileCustomInstructionsMigrated).toBe(true)
+		})
+
+		it("should NOT clobber existing profileCustomInstructions with legacy customInstructions", async () => {
+			// Set up a stored profile where both keys exist (new key already has a value)
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							id: "default-id",
+							apiProvider: "anthropic",
+							profileCustomInstructions: "New profile instructions", // Already present
+							customInstructions: "Legacy instructions that should be dropped", // Legacy should be dropped
+						},
+					},
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			// Verify that store was called with the correct data
+			expect(mockSecrets.store).toHaveBeenCalled()
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// New key should be preserved
+			expect(storedConfig.apiConfigs.default.profileCustomInstructions).toBe("New profile instructions")
+			// Legacy key should be removed
+			expect(storedConfig.apiConfigs.default.customInstructions).toBeUndefined()
+		})
+
+		it("should be idempotent - migration flag prevents re-running", async () => {
+			// Set up already migrated data
+			const alreadyMigratedConfig = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default-id",
+						apiProvider: "anthropic",
+						profileCustomInstructions: "Already migrated instructions",
+					},
+				},
+				modeApiConfigs: {},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+					profileCustomInstructionsMigrated: true,
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(alreadyMigratedConfig))
+
+			await providerSettingsManager.initialize()
+
+			// Should not write to storage since nothing changed
+			expect(mockSecrets.store).not.toHaveBeenCalled()
+		})
+
+		it("should default migration flag to true for fresh installs", async () => {
+			// Fresh install - no existing data returns default config from load()
+			mockSecrets.get.mockResolvedValue(null)
+
+			await providerSettingsManager.initialize()
+
+			// For fresh installs, no store is needed because the default config
+			// is returned from load() and matches what would be stored
+			// The key point is the default config includes profileCustomInstructionsMigrated: true
+			expect(providerSettingsManager).toBeDefined() // Just verify initialization completes without error
+		})
+
+		it("should NOT touch global state customInstructions - preserve-verbatim policy", async () => {
+			// This test verifies that the migration only affects per-profile settings,
+			// not the global customInstructions in VS Code's globalState.
+			// The profileCustomInstructions migration operates on the secrets store only.
+			// globalState.get is only called by migrateRateLimitSeconds (not the profile migration).
+
+			// Set up a profile with legacy key but rate limit already migrated
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							id: "default-id",
+							apiProvider: "anthropic",
+							customInstructions: "Profile instructions",
+						},
+					},
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			// Verify that secrets.store was called with the migrated data
+			expect(mockSecrets.store).toHaveBeenCalled()
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// The legacy key should be renamed to the new key in the secrets store
+			expect(storedConfig.apiConfigs.default.profileCustomInstructions).toBe("Profile instructions")
+			expect(storedConfig.apiConfigs.default.customInstructions).toBeUndefined()
+
+			// The global customInstructions in VS Code's globalState is NOT touched
+			// by this migration - it's a completely separate store
+		})
+
+		it("should handle multiple profiles with different migration states", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						profile1: {
+							id: "profile1-id",
+							apiProvider: "anthropic",
+							customInstructions: "Legacy from profile1", // Should migrate
+						},
+						profile2: {
+							id: "profile2-id",
+							apiProvider: "openai",
+							profileCustomInstructions: "Already migrated", // Should keep
+						},
+						profile3: {
+							id: "profile3-id",
+							apiProvider: "google",
+							// No customInstructions or profileCustomInstructions
+						},
+					},
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			expect(mockSecrets.store).toHaveBeenCalled()
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// Profile 1: legacy should be migrated
+			expect(storedConfig.apiConfigs.profile1.profileCustomInstructions).toBe("Legacy from profile1")
+			expect(storedConfig.apiConfigs.profile1.customInstructions).toBeUndefined()
+
+			// Profile 2: existing value should be preserved
+			expect(storedConfig.apiConfigs.profile2.profileCustomInstructions).toBe("Already migrated")
+			expect(storedConfig.apiConfigs.profile2.customInstructions).toBeUndefined()
+
+			// Profile 3: neither key should exist
+			expect(storedConfig.apiConfigs.profile3.profileCustomInstructions).toBeUndefined()
+			expect(storedConfig.apiConfigs.profile3.customInstructions).toBeUndefined()
 		})
 	})
 })

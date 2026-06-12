@@ -198,7 +198,11 @@ const baseProviderSettingsSchema = z.object({
 
 	// Custom instructions appended to the system prompt when this profile is active.
 	// Combined with global custom instructions and mode-specific instructions.
-	customInstructions: z.string().optional(),
+	// NOTE: Deliberately distinct from the global `customInstructions` key in
+	// globalSettingsSchema. They previously shared the same key name, which caused
+	// the flat global-state store to collide and the profile text to be duplicated
+	// in the system prompt. See ProviderSettingsManager.migrateProfileCustomInstructions.
+	profileCustomInstructions: z.string().optional(),
 
 	// Model verbosity.
 	verbosity: verbosityLevelsSchema.optional(),
