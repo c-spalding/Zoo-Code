@@ -1646,6 +1646,111 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
 
+		it("should send adaptive thinking payload for Claude Sonnet 5 when reasoning is enabled", async () => {
+			// Sonnet 5 uses the same adaptive-thinking contract as Opus 4.8 / Fable 5.
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			})
+
+			const generator = sonnet5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Sonnet 5 must use the adaptive thinking shape (no budget_tokens).
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "high" })
+			// Sampling parameters are rejected on Sonnet 5 - temperature must be absent.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+			// Sonnet 5 is a native-1M model: the Bedrock runtime must NOT receive any
+			// anthropic_beta array (it would 400 on the unknown beta flag).
+			expect(commandArg.additionalModelRequestFields?.anthropic_beta).toBeUndefined()
+		})
+
+		it("should send thinking:{type:'disabled'} for Claude Sonnet 5 when reasoning is disabled", async () => {
+			// Unique Sonnet 5 behaviour: when the user has reasoning toggled off the handler
+			// sends an explicit { type: "disabled" } rather than omitting the field, because
+			// the model defaults to adaptive thinking on when the field is absent.
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = sonnet5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Explicit disable payload - unique to Sonnet 5 among current adaptive models.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" })
+			// Temperature is still omitted (API rejects sampling params for this model).
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+			// No anthropic_beta array on the native-1M path.
+			expect(commandArg.additionalModelRequestFields?.anthropic_beta).toBeUndefined()
+		})
+
+		it("should NOT send thinking:{type:'disabled'} for always-on model Claude Fable 5 when reasoning is disabled", async () => {
+			// Fable 5 does not accept the disable payload and would return a 400 if it
+			// were sent. When reasoning is off for an always-on model the thinking field
+			// must be absent entirely (field omission is the correct semantics).
+			const fable5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = fable5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Fable 5 must NOT receive the disable payload.
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+			// Temperature is still omitted for Fable 5 (same sampling-param restriction).
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should send thinking:{type:'disabled'} for Claude Sonnet 5 (non-stream path)", async () => {
+			// The non-stream completePrompt path must mirror createMessage: Sonnet 5 gets
+			// the explicit disable payload when reasoning is off so the model does not
+			// silently default to adaptive thinking on the ConverseCommand path.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				// No enableReasoningEffort = reasoning is off.
+			})
+
+			await sonnet5Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+
+			// Non-stream path must include the disable payload for Sonnet 5.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" })
+			// Temperature must still be absent on the non-stream path.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		describe("isAdaptiveThinkingModel detection", () => {
 			// Unit-cover the private guard directly (same pattern the suite uses for
 			// parseBaseModelId / getPrefixForRegion). This exercises all four model
@@ -1697,6 +1802,19 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("us.anthropic.claude-mythos-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-mythos-5")).toBe(true)
+			})
+
+			it("returns true for Sonnet 5 bare id", () => {
+				// Sonnet 5 is listed in BEDROCK_ADAPTIVE_THINKING_MODEL_IDS so the BEDROCK
+				// registry lookup must catch it even though it lacks a numeric version suffix.
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
+			})
+
+			it("returns true for Sonnet 5 with cross-region and global prefixes", () => {
+				// parseBaseModelId strips the prefix before the BEDROCK_ADAPTIVE_THINKING_MODEL_IDS
+				// lookup, so prefixed ids must resolve to the same true result.
+				expect(isAdaptiveThinkingModel("us.anthropic.claude-sonnet-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
 			})
 		})
 	})

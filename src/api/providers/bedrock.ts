@@ -31,6 +31,8 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_ADAPTIVE_THINKING_MODEL_IDS,
+	BEDROCK_DISABLEABLE_THINKING_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	ApiProviderError,
@@ -110,6 +112,12 @@ interface BedrockAdditionalModelFields {
 				type: "adaptive"
 				// "summarized" shows thinking content in UI; omit to keep thinking internal only
 				display?: BedrockAdaptiveDisplay
+		  }
+		| {
+				// Sonnet 5 accepts an explicit disable to turn adaptive thinking OFF.
+				// Fable 5 / Mythos 5 / Opus 4.8 reject this shape with a 400; only models
+				// in BEDROCK_DISABLEABLE_THINKING_MODEL_IDS should receive this value.
+				type: "disabled"
 		  }
 	output_config?: {
 		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
@@ -535,20 +543,41 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * the opus/sonnet-4-x numeric pattern, so they require explicit substring matches
 	 * rather than being caught by the numeric guards above.
 	 *
+	 * Sonnet 5 follows the same Opus-4.8-style adaptive-thinking contract. It rejects
+	 * non-default temperature/top_p/top_k with a 400, and requires the adaptive shape
+	 * (or `thinking: {type:"disabled"}` — see BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).
+	 * This guard returns true for Sonnet 5 so that both sampling-param suppression and
+	 * the adaptive thinking branch apply correctly.
+	 *
+	 * The canonical check uses BEDROCK_ADAPTIVE_THINKING_MODEL_IDS from @roo-code/types
+	 * so that the type-package list is the single source of truth. The substring guards
+	 * below are kept as a belt-and-suspenders fallback for model ids that carry a version
+	 * suffix or a cross-region prefix that was not fully stripped.
+	 *
 	 * Accepts a model ID (with or without a cross-region/global prefix) and strips
 	 * the prefix via parseBaseModelId before matching.
 	 */
 	private isAdaptiveThinkingModel(modelId: string): boolean {
 		const baseModelId = this.parseBaseModelId(modelId)
+		// Primary check: authoritative list from the types package.
+		if (
+			BEDROCK_ADAPTIVE_THINKING_MODEL_IDS.includes(
+				baseModelId as (typeof BEDROCK_ADAPTIVE_THINKING_MODEL_IDS)[number],
+			)
+		) {
+			return true
+		}
+		// Fallback substring guards for versioned / unprefixed ids not in the static list.
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
-			// Fable 5 / Mythos 5: GA and access-gated successors to Opus 4.8 that use
-			// the same adaptive-thinking contract but have non-numeric name segments.
+			// Fable 5 / Mythos 5: GA and access-gated successors to Opus 4.8.
 			baseModelId.includes("fable-5") ||
-			baseModelId.includes("mythos-5")
+			baseModelId.includes("mythos-5") ||
+			// Sonnet 5: Opus-4.8-style adaptive contract, with explicit-disable capability.
+			baseModelId.includes("sonnet-5")
 		)
 	}
 
@@ -760,6 +789,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					thinking: additionalModelRequestFields.thinking,
 				})
 			}
+		} else if (
+			BEDROCK_DISABLEABLE_THINKING_MODEL_IDS.includes(
+				baseModelId as (typeof BEDROCK_DISABLEABLE_THINKING_MODEL_IDS)[number],
+			)
+		) {
+			// Sonnet 5 defaults adaptive thinking ON when the `thinking` field is omitted.
+			// Unlike Fable 5 / Mythos 5 / Opus 4.8 (where `{type:"disabled"}` returns a
+			// 400), Sonnet 5 accepts an explicit disable, so we send it here to honour the
+			// user's "reasoning off" toggle rather than silently leaving thinking enabled.
+			additionalModelRequestFields = { thinking: { type: "disabled" } }
+			logger.info("Adaptive thinking explicitly disabled for Bedrock request", {
+				ctx: "bedrock",
+				modelId: modelConfig.id,
+				thinking: additionalModelRequestFields.thinking,
+			})
 		}
 
 		const inferenceConfig: BedrockInferenceConfig = {
@@ -1243,18 +1287,38 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				modelConfig.reasoning &&
 				modelConfig.reasoningBudget
 
+			const isAdaptiveModel = this.isAdaptiveThinkingModel(modelConfig.id)
+
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
 				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
 				// sending temperature causes a 400 error. Guard the non-stream path the
 				// same way createMessage does so completePrompt also works for these models.
-				...(this.isAdaptiveThinkingModel(modelConfig.id)
+				...(isAdaptiveModel
 					? {}
 					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 			}
 
 			// For completePrompt, use a unique conversation ID based on the prompt
 			const conversationId = `prompt_${prompt.substring(0, 20)}`
+
+			// Build additionalModelRequestFields for completePrompt.
+			// Sonnet 5 defaults adaptive thinking ON when `thinking` is omitted; send an
+			// explicit disable so one-shot calls do not incur unintended thinking cost.
+			const baseModelIdForCompletePrompt = this.parseBaseModelId(modelConfig.id)
+			let completePromptAdditionalFields: BedrockAdditionalModelFields | undefined
+			if (
+				BEDROCK_DISABLEABLE_THINKING_MODEL_IDS.includes(
+					baseModelIdForCompletePrompt as (typeof BEDROCK_DISABLEABLE_THINKING_MODEL_IDS)[number],
+				)
+			) {
+				completePromptAdditionalFields = { thinking: { type: "disabled" } }
+				logger.info("Adaptive thinking explicitly disabled for Bedrock completePrompt", {
+					ctx: "bedrock",
+					modelId: modelConfig.id,
+					thinking: completePromptAdditionalFields.thinking,
+				})
+			}
 
 			const payload = {
 				modelId: modelConfig.id,
@@ -1271,6 +1335,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					conversationId,
 				).messages,
 				inferenceConfig,
+				...(completePromptAdditionalFields && { additionalModelRequestFields: completePromptAdditionalFields }),
 			}
 
 			const command = new ConverseCommand(payload)

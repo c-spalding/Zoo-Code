@@ -5,6 +5,7 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS,
 	BEDROCK_ADAPTIVE_THINKING_MODEL_IDS,
+	BEDROCK_DISABLEABLE_THINKING_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
 	bedrockModels,
@@ -170,6 +171,51 @@ describe("Bedrock model catalog", () => {
 		expect(BEDROCK_GLOBAL_INFERENCE_MODEL_IDS).toContain("anthropic.claude-mythos-5")
 		// Mythos 5 is 1M-by-default, so it must NOT appear in the opt-in 1M list.
 		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-mythos-5")
+	})
+
+	it("includes Claude Sonnet 5 with 1M context as the default (no opt-in tier) and Sonnet 4.6 pricing", () => {
+		const sonnet5 = bedrockModels["anthropic.claude-sonnet-5" as keyof typeof bedrockModels] as ModelInfo
+		expect(sonnet5).toBeDefined()
+		// Sonnet 5 serves the full 1M context by default; no 200K base / 1M tier split.
+		expect(sonnet5.contextWindow).toBe(1_000_000)
+		// No tiers array: context is flat (native 1M, not opt-in).
+		expect(sonnet5.tiers).toBeUndefined()
+		// Max output cap matches Opus 4.8 / Fable 5 / Mythos 5.
+		expect(sonnet5.maxTokens).toBe(128_000)
+		// Same adaptive-thinking feature set as the other 5-series models.
+		expect(sonnet5.supportsReasoningBudget).toBe(true)
+		// Temperature is rejected by the model API (same constraint as Opus 4.8 / Fable 5).
+		expect(sonnet5.supportsTemperature).toBe(false)
+		expect(sonnet5.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+		// Pricing matches Sonnet 4.6 Bedrock list price ($3/$15, not the doubled Fable/Mythos rate).
+		expect(sonnet5.inputPrice).toBe(3.0)
+		expect(sonnet5.outputPrice).toBe(15.0)
+		expect(sonnet5.cacheWritesPrice).toBe(3.75)
+		expect(sonnet5.cacheReadsPrice).toBe(0.3)
+	})
+
+	it("flags Sonnet 5 as a native-1M and adaptive-thinking model on Bedrock", () => {
+		// Native-1M membership ensures the runtime suppresses the legacy 1M beta header.
+		expect(BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS).toContain("anthropic.claude-sonnet-5")
+		// Adaptive-thinking membership ensures the runtime sends `thinking: { type: "adaptive" }`
+		// + `output_config.effort` instead of the legacy `budget_tokens` shape.
+		expect(BEDROCK_ADAPTIVE_THINKING_MODEL_IDS).toContain("anthropic.claude-sonnet-5")
+	})
+
+	it("registers Sonnet 5 for Global Inference but NOT the opt-in 1M dropdown", () => {
+		expect(BEDROCK_GLOBAL_INFERENCE_MODEL_IDS).toContain("anthropic.claude-sonnet-5")
+		// Sonnet 5 is 1M-by-default, so it must NOT appear in the opt-in 1M list -
+		// otherwise the dropdown would synthesise a redundant :1m twin.
+		expect(BEDROCK_1M_CONTEXT_MODEL_IDS).not.toContain("anthropic.claude-sonnet-5")
+	})
+
+	it("places Sonnet 5 in BEDROCK_DISABLEABLE_THINKING_MODEL_IDS and ONLY there", () => {
+		// Sonnet 5 uniquely accepts thinking: { type: "disabled" }; no other current model does.
+		expect(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).toContain("anthropic.claude-sonnet-5")
+		// The always-on models must NOT appear in this list (they 400 on the disable payload).
+		expect(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).not.toContain("anthropic.claude-fable-5")
+		expect(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).not.toContain("anthropic.claude-mythos-5")
+		expect(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).not.toContain("anthropic.claude-opus-4-8")
 	})
 })
 

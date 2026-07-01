@@ -257,6 +257,45 @@ export const bedrockModels = {
 		cachableFields: ["system", "messages", "tools"],
 		description: "Claude Opus 4.8 - most capable Opus model for agentic coding (native 1M context, default)",
 	},
+	"anthropic.claude-sonnet-5": {
+		// Sonnet 5 is the successor to Sonnet 4.6. Per the Anthropic migration guide
+		// (https://platform.claude.com/docs/en/about-claude/models/migration-guide#migrating-from-claude-sonnet-4-6-to-claude-sonnet-5)
+		// it follows the same API contract as Opus 4.8 with the following key properties:
+		//   - 1M token context window is the DEFAULT (no opt-in, no beta header), so we
+		//     set contextWindow directly to 1M and exclude this model from
+		//     BEDROCK_1M_CONTEXT_MODEL_IDS (the opt-in dropdown path).
+		//   - 128k max output tokens (unchanged from 4.6).
+		//   - Adaptive thinking is ON by default when the `thinking` field is omitted.
+		//   - Unlike Fable 5 / Mythos 5 / Opus 4.8 (where `thinking: {type:"disabled"}`
+		//     returns a 400), Sonnet 5 accepts an explicit disable payload to actually turn
+		//     adaptive thinking off. The handler sends `thinking: {type:"disabled"}` when
+		//     the user has reasoning toggled off, rather than relying on field omission.
+		//   - Pricing: $3/$15 per MTok input/output (list price, matching Sonnet 4.6 Bedrock).
+		//   - Non-default temperature/top_p/top_k return a 400 (same constraint as Opus 4.8).
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		// Same effort surface as Fable 5 / Opus 4.8 (low / medium / high / xhigh / max).
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		// Sonnet 5 rejects non-default temperature/top_p/top_k with a 400. The
+		// model-params layer honors this flag by suppressing temperature in the Bedrock
+		// inferenceConfig, and the adaptive-thinking guard in the handler keeps it clear.
+		supportsTemperature: false,
+		// Pricing matches Sonnet 4.6 Bedrock list price ($3/$15 input/output). The 1M
+		// context window does NOT incur a long-context surcharge.
+		inputPrice: 3.0, // $3 per million input tokens
+		outputPrice: 15.0, // $15 per million output tokens
+		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheReadsPrice: 0.3, // $0.30 per million tokens
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		promptCacheTtl: "1h",
+		description:
+			"Claude Sonnet 5 - best combination of speed and intelligence (native 1M context, adaptive thinking on by default, can be disabled)",
+	},
 	"anthropic.claude-fable-5": {
 		// Fable 5 is the GA successor to Opus 4.8. Per the Anthropic migration guide
 		// (https://platform.claude.com/docs/en/about-claude/models/migration-guide)
@@ -706,15 +745,16 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // See: https://github.com/continuedev/continue/pull/11969 for the Bedrock validation
 // behavior that surfaced this issue.
 //
-// Opus 4.8, Fable 5, and Mythos 5 also belong here even though they are not in
-// BEDROCK_1M_CONTEXT_MODEL_IDS: their 1M context is the DEFAULT (always on), so there
-// is no opt-in tier dropdown, but the Bedrock runtime still must avoid sending the
-// legacy 1M beta header AND the fine-grained-tool-streaming beta.
+// Opus 4.8, Fable 5, Mythos 5, and Sonnet 5 also belong here even though they are not
+// in BEDROCK_1M_CONTEXT_MODEL_IDS: their 1M context is the DEFAULT (always on), so
+// there is no opt-in tier dropdown, but the Bedrock runtime still must avoid sending
+// the legacy 1M beta header AND the fine-grained-tool-streaming beta.
 export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = [
 	"anthropic.claude-opus-4-7",
 	"anthropic.claude-opus-4-8",
 	"anthropic.claude-fable-5",
 	"anthropic.claude-mythos-5",
+	"anthropic.claude-sonnet-5",
 ] as const
 
 // Models that REJECT the legacy `thinking: { type: "enabled", budget_tokens: N }` payload
@@ -726,13 +766,22 @@ export const BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS = [
 //   invalid_request_error: "thinking.type.enabled" is not supported for this model.
 //   Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
 //
-// Fable 5 and Mythos 5 use the identical adaptive-thinking contract as Opus 4.8.
+// Fable 5, Mythos 5, and Sonnet 5 use the identical adaptive-thinking contract as Opus 4.8.
 export const BEDROCK_ADAPTIVE_THINKING_MODEL_IDS = [
 	"anthropic.claude-opus-4-7",
 	"anthropic.claude-opus-4-8",
 	"anthropic.claude-fable-5",
 	"anthropic.claude-mythos-5",
+	"anthropic.claude-sonnet-5",
 ] as const
+
+// Models that accept the adaptive-thinking `thinking: { type: "disabled" }` payload to
+// turn thinking OFF. Sonnet 5 is unique among the current adaptive models: it defaults
+// thinking ON when the `thinking` field is omitted, but unlike Fable 5 / Mythos 5 /
+// Opus 4.8 (where `{type: "disabled"}` returns a 400) it accepts an explicit disable.
+// The handler uses this to honour a user's "reasoning off" toggle rather than silently
+// leaving adaptive thinking enabled.
+export const BEDROCK_DISABLEABLE_THINKING_MODEL_IDS = ["anthropic.claude-sonnet-5"] as const
 
 // Previously Claude 4.6 Sonnet/Opus auto-advertised 1M. With the new dual dropdown
 // (default-context + `:1m` variant) the UI always exposes both tiers explicitly, so
@@ -1166,10 +1215,11 @@ export const resolveBedrockModelInfo = ({
 }
 
 // Amazon Bedrock models that support Global Inference profiles
-// As of May 2026, AWS supports Global Inference for:
+// As of July 2026, AWS supports Global Inference for:
 // - Claude Sonnet 4
 // - Claude Sonnet 4.5
 // - Claude Sonnet 4.6
+// - Claude Sonnet 5
 // - Claude Haiku 4.5
 // - Claude Opus 4.5
 // - Claude Opus 4.6
@@ -1181,6 +1231,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"anthropic.claude-sonnet-4-6",
+	"anthropic.claude-sonnet-5",
 	"anthropic.claude-haiku-4-5-20251001-v1:0",
 	"anthropic.claude-opus-4-5-20251101-v1:0",
 	"anthropic.claude-opus-4-6-v1",
