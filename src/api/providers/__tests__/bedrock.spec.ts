@@ -1589,13 +1589,32 @@ describe("AwsBedrockHandler", () => {
 
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
 
-		it("should send adaptive thinking with effort xhigh for Claude Opus 4.7 when reasoning is enabled", async () => {
+		// Minimal shape used to inspect the additionalModelRequestFields/inferenceConfig
+		// sent to the mocked AWS SDK commands in this describe block. The real
+		// ConverseCommandInput/ConverseStreamCommandInput types declare
+		// additionalModelRequestFields as an opaque DocumentType, so a narrow local
+		// type (rather than `any`) is used to read the adaptive-thinking-specific
+		// fields asserted on below.
+		type AdaptiveThinkingCommandArg = {
+			additionalModelRequestFields?: {
+				thinking?: { type: string; display?: string }
+				output_config?: { effort: string }
+				anthropic_beta?: string[]
+			}
+			inferenceConfig?: { temperature?: number }
+		}
+
+		it("should send adaptive thinking with effort xhigh for Claude Opus 4.7 when reasoning effort is explicitly set", async () => {
+			// The effort value now flows from the user's explicit reasoningEffort setting
+			// (normalizeReasoningEffortForBedrock) rather than being hardcoded — see the
+			// budget-fallback test below for the case where no explicit effort is set.
 			const opus47Handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-7",
 				awsAccessKey: "test-access-key",
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
+				reasoningEffort: "xhigh",
 			})
 
 			const generator = opus47Handler.createMessage("System prompt", messages)
@@ -1614,13 +1633,14 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
-		it("should send adaptive thinking with effort xhigh for Claude Opus 4.8 when reasoning is enabled", async () => {
+		it("should send adaptive thinking with effort xhigh for Claude Opus 4.8 when reasoning effort is explicitly set", async () => {
 			const opus48Handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-8",
 				awsAccessKey: "test-access-key",
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
+				reasoningEffort: "xhigh",
 			})
 
 			const generator = opus48Handler.createMessage("System prompt", messages)
@@ -1639,7 +1659,7 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
-		it("should send adaptive thinking with effort xhigh for Claude Sonnet 5 when reasoning is enabled", async () => {
+		it("should send adaptive thinking with effort xhigh for Claude Sonnet 5 when reasoning effort is explicitly set", async () => {
 			// End-to-end regression guard for the Sonnet 5 handler branch. The
 			// isAdaptiveThinkingModel predicate is unit-covered, but a regression in
 			// the createMessage adaptive-thinking branch for this specific model
@@ -1650,6 +1670,7 @@ describe("AwsBedrockHandler", () => {
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
+				reasoningEffort: "xhigh",
 			})
 
 			const generator = sonnet5Handler.createMessage("System prompt", messages)
@@ -1669,7 +1690,7 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
-		it("should send adaptive thinking with effort xhigh for Claude Opus 5 when reasoning is enabled", async () => {
+		it("should send adaptive thinking with effort xhigh for Claude Opus 5 when reasoning effort is explicitly set", async () => {
 			// End-to-end regression guard for the Opus 5 handler branch. The
 			// isAdaptiveThinkingModel predicate is unit-covered, but a regression in
 			// the createMessage adaptive-thinking branch for this specific model
@@ -1680,6 +1701,7 @@ describe("AwsBedrockHandler", () => {
 				awsSecretKey: "test-secret-key",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
+				reasoningEffort: "xhigh",
 			})
 
 			const generator = opus5Handler.createMessage("System prompt", messages)
@@ -1697,6 +1719,118 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
 			// Opus 5 rejects sampling parameters: temperature must be omitted entirely.
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should fall back to a budget-derived effort bucket when no explicit reasoningEffort is set", async () => {
+			// With enableReasoningEffort:true but no explicit reasoningEffort setting,
+			// getModelParams falls back to DEFAULT_HYBRID_REASONING_MODEL_THINKING_TOKENS
+			// (8192), which mapReasoningBudgetToBedrockEffort buckets to "medium" — the
+			// budget-fallback path never produces "xhigh"/"max" on its own.
+			const opus47Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus47Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "medium" })
+		})
+
+		it("should send adaptive thinking for Claude Mythos 5 (UNVERIFIED model) when reasoning effort is explicitly set", async () => {
+			const mythosHandler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-mythos-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			})
+
+			const generator = mythosHandler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "high" })
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should explicitly disable thinking for Claude Sonnet 5 when reasoning is not enabled", async () => {
+			// Sonnet 5 defaults adaptive thinking ON when `thinking` is omitted, so an
+			// explicit `{type:"disabled"}` must be sent to honour the user's "off" setting.
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = sonnet5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" })
+		})
+
+		it("should NOT explicitly disable thinking for Claude Opus 5 when reasoning is not enabled (400 risk)", async () => {
+			// Opus 5 is intentionally excluded from BEDROCK_DISABLEABLE_THINKING_MODEL_IDS
+			// because it rejects thinking:{type:"disabled"} with a 400. Thinking stays on
+			// (i.e. no thinking field at all is sent) by default.
+			const opus5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = opus5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+		})
+
+		it("should omit anthropic_beta entirely for adaptive-thinking models even when awsBedrock1MContext is enabled", async () => {
+			// Opus 4.7/4.8 are also listed in BEDROCK_1M_CONTEXT_MODEL_IDS for pricing-tier
+			// purposes, but the adaptive-thinking skip gate must win: Bedrock Converse
+			// returns "invalid beta flag" for both betas on these models.
+			const opus47Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				awsBedrock1MContext: true,
+			})
+
+			const generator = opus47Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.anthropic_beta).toBeUndefined()
 		})
 
 		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
@@ -1814,6 +1948,62 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
 
+		it("completePrompt should explicitly disable thinking for Claude Sonnet 5 (non-stream path)", async () => {
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await sonnet5Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as AdaptiveThinkingCommandArg
+
+			// completePrompt never enables reasoning explicitly, so Sonnet 5 (which
+			// defaults thinking ON) must receive an explicit disable to avoid
+			// unwanted thinking cost/latency on one-shot calls.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({ type: "disabled" })
+		})
+
+		it("completePrompt should return the first text block when a reasoning block is returned first (non-stream path)", async () => {
+			// Regression test for the completePrompt robustness fix: models with
+			// always-on / on-by-default reasoning (e.g. Fable 5) can return the
+			// reasoning content block before the text block, so content[0] is not
+			// reliably the answer text. completePrompt must scan for the first block
+			// that actually carries a non-empty `text` property.
+			const mockSend = vi.fn()
+
+			const fableHandler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const clientInstance = fableHandler["client"]
+			clientInstance.send = mockSend
+
+			mockSend.mockResolvedValueOnce({
+				output: {
+					message: {
+						content: [
+							{ reasoningContent: { reasoningText: { text: "internal reasoning" } } },
+							{ type: "text", text: "the actual answer" },
+						],
+					},
+					stopReason: "end_turn",
+				},
+			})
+
+			const result = await fableHandler.completePrompt("Test prompt")
+
+			expect(result).toBe("the actual answer")
+		})
+
 		describe("isAdaptiveThinkingModel detection", () => {
 			// Unit-cover the private guard directly (same pattern the suite uses for
 			// parseBaseModelId / getPrefixForRegion). This exercises all four model
@@ -1831,8 +2021,13 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-8")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5-1")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5")).toBe(true)
+				// UNVERIFIED model — no published Bedrock ID exists yet, but the matcher
+				// must still recognise it once one is available.
+				expect(isAdaptiveThinkingModel("anthropic.claude-mythos-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-mythos-preview")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1841,8 +2036,10 @@ describe("AwsBedrockHandler", () => {
 			it("returns true when the id carries a cross-region or global prefix", () => {
 				expect(isAdaptiveThinkingModel("us.anthropic.claude-opus-4-8")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5-1")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-mythos-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})

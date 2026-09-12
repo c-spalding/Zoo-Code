@@ -31,6 +31,7 @@ import {
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
+	BEDROCK_DISABLEABLE_THINKING_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
@@ -64,6 +65,14 @@ interface BedrockInferenceConfig {
 	temperature?: number
 }
 
+// Claude 4.7+ adaptive-thinking effort levels, from lowest to highest reasoning effort.
+// See normalizeReasoningEffortForBedrock / mapReasoningBudgetToBedrockEffort below.
+type BedrockAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max"
+
+// Claude 4.7+ adaptive-thinking display mode: "summarized" surfaces thinking content in
+// the Zoo Code UI; "omitted" keeps thinking internal only (never sent back to the client).
+type BedrockAdaptiveDisplay = "summarized" | "omitted"
+
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
 interface BedrockAdditionalModelFields {
@@ -75,15 +84,73 @@ interface BedrockAdditionalModelFields {
 		| {
 				// Claude 4.7+ adaptive thinking — no budget_tokens, uses output_config.effort instead
 				type: "adaptive"
-				// "summarized" shows thinking content in UI; omit to keep thinking internal only
-				display?: "summarized" | "none"
+				display?: BedrockAdaptiveDisplay
+		  }
+		| {
+				// Explicit opt-out of reasoning. Only a subset of adaptive-thinking models
+				// (see BEDROCK_DISABLEABLE_THINKING_MODEL_IDS) accept this variant.
+				type: "disabled"
 		  }
 	output_config?: {
-		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
-		effort: string
+		effort: BedrockAdaptiveEffort
 	}
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
+}
+
+/**
+ * Map a legacy reasoning-budget (token count) onto the nearest adaptive-thinking
+ * effort bucket. Used as a fallback when the user hasn't set an explicit
+ * reasoningEffort value for an adaptive-thinking model, so existing
+ * budget-based settings still produce a sensible effort level. This mapping
+ * never produces "xhigh" or "max" — those are only reachable via an explicit
+ * user choice through normalizeReasoningEffortForBedrock.
+ */
+function mapReasoningBudgetToBedrockEffort(budget: number | undefined): BedrockAdaptiveEffort {
+	const normalizedBudget = typeof budget === "number" && Number.isFinite(budget) && budget > 0 ? budget : 0
+	if (normalizedBudget <= 4096) {
+		return "low"
+	}
+	if (normalizedBudget <= 16384) {
+		return "medium"
+	}
+	return "high"
+}
+
+/**
+ * Normalize a user-supplied reasoningEffort setting into a Bedrock
+ * adaptive-thinking effort level. Returns undefined when the value doesn't
+ * map to a Bedrock effort level (e.g. "disable", "none", or unset), so the
+ * caller can fall back to mapReasoningBudgetToBedrockEffort.
+ */
+function normalizeReasoningEffortForBedrock(value: unknown): BedrockAdaptiveEffort | undefined {
+	if (typeof value !== "string") {
+		return undefined
+	}
+	const normalizedValue = value.toLowerCase()
+	if (
+		normalizedValue === "low" ||
+		normalizedValue === "medium" ||
+		normalizedValue === "high" ||
+		normalizedValue === "xhigh" ||
+		normalizedValue === "max"
+	) {
+		return normalizedValue
+	}
+	if (normalizedValue === "minimal") {
+		return "low"
+	}
+	return undefined
+}
+
+/**
+ * Type-safe membership check against a `readonly string[]` (e.g. the
+ * `as const` model-id lists from `@roo-code/types`). Avoids the `as any`
+ * cast that `Array<T>.includes` would otherwise require when checking a
+ * wider `string` against a narrower readonly tuple type.
+ */
+function isMemberOf<T extends string>(list: readonly T[], value: string): value is T {
+	return (list as readonly string[]).includes(value)
 }
 
 // Define interface for Bedrock payload
@@ -345,6 +412,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			baseModelId.includes("opus-4-8") ||
 			baseModelId.includes("opus-5") ||
 			baseModelId.includes("fable-5") ||
+			baseModelId.includes("mythos-5") ||
+			baseModelId.includes("mythos-preview") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
 			baseModelId.includes("sonnet-5")
@@ -464,15 +533,18 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
 			if (isAdaptiveThinkingModel) {
-				// Claude 4.7+ (incl. 4.8 and Fable 5) uses adaptive thinking with effort levels —
-				// budget_tokens causes a 400 error.
+				// Claude 4.7+ (incl. 4.8, Fable 5/5.1, Sonnet 5, Opus 5) uses adaptive thinking
+				// with effort levels — budget_tokens causes a 400 error.
 				// display: "summarized" surfaces thinking content in Zoo Code UI.
-				// effort "xhigh" remains the recommended level for agentic coding tasks
-				// across 4.7, 4.8, and Fable 5 (4.8 changed the API default to "high"
-				// but the models continue to honour "xhigh" for deeper reasoning).
+				// Effort prefers the user's explicit reasoningEffort setting; when unset, it
+				// falls back to mapping the legacy reasoning budget onto the nearest bucket
+				// so existing budget-based configurations still produce sensible behaviour.
+				const adaptiveThinkingEffort =
+					normalizeReasoningEffortForBedrock(this.options.reasoningEffort) ??
+					mapReasoningBudgetToBedrockEffort(modelConfig.reasoningBudget)
 				additionalModelRequestFields = {
 					thinking: { type: "adaptive", display: "summarized" },
-					output_config: { effort: "xhigh" },
+					output_config: { effort: adaptiveThinkingEffort },
 				}
 			} else {
 				additionalModelRequestFields = {
@@ -486,6 +558,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				ctx: "bedrock",
 				modelId: modelConfig.id,
 				thinking: additionalModelRequestFields?.thinking,
+			})
+		} else if (isAdaptiveThinkingModel && isMemberOf(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS, baseModelId)) {
+			// Adaptive-thinking models reason by default and most reject an explicit
+			// opt-out, but Claude Sonnet 5 accepts `thinking: { type: "disabled" }`.
+			// Send it whenever the user hasn't enabled reasoning so Sonnet 5 actually
+			// stops reasoning instead of silently ignoring the setting. Other adaptive
+			// models (Opus 4.7+/5, Fable 5/5.1) are intentionally excluded from
+			// BEDROCK_DISABLEABLE_THINKING_MODEL_IDS because they return a 400 for
+			// this variant.
+			additionalModelRequestFields = {
+				thinking: { type: "disabled" },
+			}
+			logger.info("Extended thinking explicitly disabled for Bedrock request", {
+				ctx: "bedrock",
+				modelId: modelConfig.id,
 			})
 		}
 
@@ -514,19 +601,31 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			})
 		}
 
+		// AWS Bedrock Converse validates anthropic_beta against a per-model allow list and
+		// returns `invalid_request_error: invalid beta flag` for unknown values. Adaptive-
+		// thinking models (Opus 4.7+, Sonnet 5, Fable 5/5.1, Mythos 5) have native 1M
+		// context and reject BOTH the 1M beta and the fine-grained-tool-streaming beta, so
+		// anthropic_beta must be omitted entirely for them — even when is1MContextEnabled
+		// is true (e.g. Opus 4.7/4.8 are also listed in BEDROCK_1M_CONTEXT_MODEL_IDS for
+		// pricing-tier purposes). Older Claudes silently accept (and effectively ignore)
+		// these betas, so behaviour for them is unchanged.
+		const skipAnthropicBetaFlags = isAdaptiveThinkingModel
+
 		// Add anthropic_beta headers for various features
 		// Start with an empty array and add betas as needed
 		const anthropicBetas: string[] = []
 
-		// Add 1M context beta if enabled
-		if (is1MContextEnabled) {
-			anthropicBetas.push("context-1m-2025-08-07")
-		}
+		if (!skipAnthropicBetaFlags) {
+			// Add 1M context beta if enabled
+			if (is1MContextEnabled) {
+				anthropicBetas.push("context-1m-2025-08-07")
+			}
 
-		// Add fine-grained tool streaming beta for Claude models
-		// This enables proper tool use streaming for Anthropic models on Bedrock
-		if (baseModelId.includes("claude")) {
-			anthropicBetas.push("fine-grained-tool-streaming-2025-05-14")
+			// Add fine-grained tool streaming beta for Claude models
+			// This enables proper tool use streaming for Anthropic models on Bedrock
+			if (baseModelId.includes("claude")) {
+				anthropicBetas.push("fine-grained-tool-streaming-2025-05-14")
+			}
 		}
 
 		// Apply anthropic_beta to additionalModelRequestFields if any betas are needed
@@ -867,14 +966,31 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				modelConfig.reasoning &&
 				modelConfig.reasoningBudget
 
+			const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
+
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
 				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
 				// sending temperature causes a 400 error. Guard the non-stream path the
 				// same way createMessage does so completePrompt also works for these models.
-				...(this.isAdaptiveThinkingModel(modelConfig.id)
+				...(isAdaptiveThinkingModel
 					? {}
 					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
+			}
+
+			// Adaptive-thinking models reason by default. completePrompt never enables
+			// reasoning explicitly, so send an explicit disable for the models that accept
+			// it (see BEDROCK_DISABLEABLE_THINKING_MODEL_IDS) to avoid unwanted thinking
+			// cost/latency on one-shot calls. Other adaptive models reject this shape with
+			// a 400 and are intentionally left out of the list — thinking stays on for them.
+			const baseModelId = this.parseBaseModelId(modelConfig.id)
+			let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
+			if (isAdaptiveThinkingModel && isMemberOf(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS, baseModelId)) {
+				additionalModelRequestFields = { thinking: { type: "disabled" } }
+				logger.info("Extended thinking explicitly disabled for Bedrock completePrompt", {
+					ctx: "bedrock",
+					modelId: modelConfig.id,
+				})
 			}
 
 			// For completePrompt, use a unique conversation ID based on the prompt
@@ -895,6 +1011,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					conversationId,
 				).messages,
 				inferenceConfig,
+				...(additionalModelRequestFields && { additionalModelRequestFields }),
 			}
 
 			const command = new ConverseCommand(payload)
@@ -907,14 +1024,19 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			const sendOptions = mergedAbortSignal ? { abortSignal: mergedAbortSignal } : undefined
 			const response = await this.client.send(command, sendOptions)
 
-			if (
-				response?.output?.message?.content &&
-				response.output.message.content.length > 0 &&
-				response.output.message.content[0].text &&
-				response.output.message.content[0].text.trim().length > 0
-			) {
+			// Models with always-on / on-by-default reasoning (e.g. Fable 5, Mythos 5)
+			// return the reasoning content block before the text block, so content[0]
+			// is not reliably the answer text. Scan for the first block that actually
+			// carries a non-empty `text` property instead of assuming position 0.
+			const textBlock = response?.output?.message?.content?.find(
+				(block): block is ContentBlock.TextMember =>
+					typeof (block as { text?: unknown })?.text === "string" &&
+					(block as { text: string }).text.trim().length > 0,
+			)
+
+			if (textBlock) {
 				try {
-					return response.output.message.content[0].text
+					return textBlock.text
 				} catch (parseError) {
 					logger.error("Failed to parse Bedrock response", {
 						ctx: "bedrock",
