@@ -1072,3 +1072,68 @@ release, **must** update this file in the same PR/merge:
 - Do not let this file drift silently. If a tranche's re-applied code ends up differing
   materially from what its section here describes, update the section as part of that
   tranche's own PR, not as a separate cleanup pass.
+
+## 16. Resync log 2026-09-21
+
+**Old base:** upstream `v3.82.0`, `134923e15` (2026-09-10 re-baseline).
+**New base:** `zoo/main` tip `01928c3c4` (`v3.82.2` + 14 unreleased commits, 2026-09-21).
+
+**Branches rebased onto NEW-BASE:**
+
+- `fork/00-docs`: single commit `15d6e3b18` -> `ac5ff85df` via
+  `git rebase --onto 01928c3c4 134923e15 fork/00-docs`. Zero conflicts (new files only,
+  as recon predicted).
+- `fork/03-bedrock-reasoning`: its own 3 commits (`15a50e19e`, `99aa149d2`, `56c41a476`)
+  rebased with `--onto` from the parent of `15a50e19e` (the `fork/00-docs` merge commit,
+  `bdb728d12`) onto the rebased `fork/00-docs` tip (`ac5ff85df`) -> new tip `2f467b587`.
+  Zero conflicts; the three touched upstream files were byte-identical between OLD-BASE
+  and NEW-BASE as recon predicted, including `fork-feature-inventory.md`.
+- `feature/zoo-base`: reset to `01928c3c4`, then `git merge --no-ff fork/00-docs` followed
+  by `git merge --no-ff fork/03-bedrock-reasoning`. Both merges were genuine two-parent
+  merges (no fast-forward, no redundant/no-op merge) -- `b18272e6e` -> `8504b3590`.
+
+**Conflicts encountered:** none, at any step. Recon's conflict-free prediction held for
+both branches.
+
+**Validation results:**
+
+- `pnpm check-types` (root, all 13 packages via turbo): 11/11 tasks successful.
+- `cd src && npx vitest run api/providers/__tests__/bedrock.spec.ts
+api/providers/__tests__/bedrock-reasoning.spec.ts`: 2 test files passed, **112 tests
+  passed**, 0 failed.
+
+**Hygiene findings (step 7):** `pnpm install` completed cleanly (lockfile unchanged,
+mostly reused packages). 13 `node_modules` directories found, one per workspace package
+(root, `src`, `webview-ui`, `apps/cli`, `apps/vscode-e2e`, `packages/*`) -- no orphaned
+duplicates. `git diff --diff-filter=D 134923e15 01928c3c4` returned **zero deleted
+files**, so the 2026-09-10-style "deleted-in-git but persisting on disk" hazard does not
+apply to this resync. Spot-checked shims (`tsc`, `turbo`) executed correctly
+post-install.
+
+**Process observations for the playbook:**
+
+- Stacking `fork/03-bedrock-reasoning` on the rebased `fork/00-docs` (rather than both
+  independently on NEW-BASE) worked cleanly and is the right call when a later branch's
+  commits edit a file the earlier branch created (here, both touch
+  `fork-feature-inventory.md`). An octopus/independent-branch approach would have forced
+  a manual 3-way reconciliation of that file instead of letting git's linear rebase
+  history absorb it for free. Keep this stacking approach in the repeatable playbook
+  whenever tranche N's commits are known to touch a file introduced by tranche N-1.
+- The two-merge rebuild of `feature/zoo-base` produced a clean diamond graph with no
+  redundant/fast-forwarded merge, because `fork/03-bedrock-reasoning`'s history already
+  contained `fork/00-docs`'s rebased tip as an ancestor. The task's contingency
+  ("if the first merge becomes redundant, merge only fork/03 alone") did not trigger;
+  worth keeping the contingency documented anyway since it is base-composition-dependent.
+- `git push origin main` (and every subsequent push) triggered the pre-push hook running
+  `turbo check-types` across all packages even for a plain fast-forward; this adds
+  reliable but non-trivial overhead (~1-2.5 min cold, under 1s warm/cached) to every push
+  in the playbook -- expected and acceptable, but worth budgeting for in timing estimates.
+- Environment friction: the default shell is Windows PowerShell 5.1, which does not
+  support `&&`; every multi-command invocation needed `;` chaining per the workspace
+  instructions. A nested `powershell -Command "..."` wrapper for a hygiene-check script
+  caused `$_` to be stripped by outer-string interpolation before reaching the pipeline --
+  running PowerShell natively (no nested wrapper) avoided this. Static-analysis regex
+  parsing of pnpm's `.cmd` shims for "broken" targets produced false positives (pnpm's
+  shims legitimately reference optional/fallback paths that need not exist); executing a
+  shim directly (`--version`) is a more reliable staleness signal than parsing its
+  contents.
