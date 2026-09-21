@@ -32,18 +32,18 @@ Implementation order (left to right). "NN" is the branch-name tag; "Upstream sta
 the one-line recon verdict; "Mandatory fixes" lists only the findings this project
 requires before merging the tranche (see section per tranche for the advisory list).
 
-| Order | Branch                         | Tranche                                            | Upstream status (recon)                                                                                    | Mandatory fixes carried |
-| ----- | ------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------- |
-| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort | PARTIAL / REFACTORED-UNDERNEATH -- superseded in shape, reconciled per adaptive-thinking-reconciliation.md | F-BP-3                  |
-| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                    | ABSENT -- clean re-application                                                                             | none mandatory          |
-| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                  | ABSENT/mixed -- depends on T4                                                                              | none mandatory          |
-| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe              | PARTIAL -- probe logic absent; UI component name collision with upstream                                   | none mandatory          |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode        | ABSENT -- clean re-application                                                                             | none mandatory          |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions              | ABSENT -- clean, but migration logic needs re-diff                                                         | none mandatory          |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                   | ABSENT -- clean re-application                                                                             | none mandatory          |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                      | ABSENT, entangled with `tool-use.ts` shape                                                                 | F-AI-2, F-AI-3          |
-| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                    | ABSENT, entangled with T9's `tool-use.ts` changes                                                          | F-LC-1                  |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                              | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                                 | none mandatory          |
+| Order | Branch                         | Tranche                                            | Upstream status (recon)                                                                           | Mandatory fixes carried               |
+| ----- | ------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md | F-BP-3 (not needed; never introduced) |
+| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                    | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                  | ABSENT/mixed -- depends on T4                                                                     | none mandatory                        |
+| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe              | PARTIAL -- probe logic absent; UI component name collision with upstream                          | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode        | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions              | ABSENT -- clean, but migration logic needs re-diff                                                | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                   | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                      | ABSENT, entangled with `tool-use.ts` shape                                                        | F-AI-2, F-AI-3                        |
+| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                    | ABSENT, entangled with T9's `tool-use.ts` changes                                                 | F-LC-1                                |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                              | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                        | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -52,6 +52,31 @@ requires before merging the tranche (see section per tranche for the advisory li
 ## 3. T3 -- Bedrock adaptive thinking / reasoning effort
 
 **Order:** 1st (branch `fork/03-bedrock-reasoning`)
+
+**Status: MERGED** into `feature/zoo-base` (2026-09-12). Branch tip commits:
+`15a50e19e` (catalog metadata: `supportsReasoningEffort`, `anthropic.claude-mythos-5`,
+`BEDROCK_DISABLEABLE_THINKING_MODEL_IDS`) and `99aa149d2` (effort wiring, beta-flag skip
+gate, Sonnet 5 explicit-disable, `completePrompt` first-text-block fix, and test port).
+Merge commit: see `feature/zoo-base` log for the `--no-ff` merge of
+`fork/03-bedrock-reasoning`.
+
+**Scope actually implemented (matches the change list below) with one deliberate
+deviation:** upstream's `isAdaptiveThinkingModel()` in `bedrock.ts` was kept as the sole
+matcher (per the minimal-touch decision) rather than porting the fork's
+`BEDROCK_ADAPTIVE_THINKING_MODEL_IDS` exported constant -- the recon doc's item 1
+suggestion to "use the fork's `parseBedrockBaseModelId`" was not adopted; upstream's own
+`parseBaseModelId` (already used by `isAdaptiveThinkingModel`'s caller) was sufficient
+and kept the diff smaller. All other numbered items (2-7) were implemented as specified.
+F-BP-3 (`as any` cast on `reasoningEffort`) was never introduced in this re-application,
+so no fix was needed for it; a related new-code `as any` avoidance (`isMemberOf<T>` type
+guard for `BEDROCK_DISABLEABLE_THINKING_MODEL_IDS.includes(...)`) was added to keep
+`src/eslint-suppressions.json`'s `@typescript-eslint/no-explicit-any` count for
+`api/providers/bedrock.ts` at its pre-existing baseline (34) instead of raising it.
+
+**Not verified this tranche:** `webview-ui/src/components/settings/ThinkingBudget.tsx`
+was not modified -- `supportsReasoningEffort` is an already-established generic pattern
+that upstream's UI reads for other providers, so no changes were expected there, but this
+was not explicitly re-confirmed by reading that file during this tranche.
 
 ### Purpose
 

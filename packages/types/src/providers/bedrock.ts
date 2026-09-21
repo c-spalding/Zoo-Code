@@ -58,6 +58,7 @@ export const bedrockModels = {
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		supportsTemperature: false,
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
@@ -191,6 +192,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -215,6 +217,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -242,6 +245,7 @@ export const bedrockModels = {
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		supportsTemperature: false,
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
@@ -259,6 +263,7 @@ export const bedrockModels = {
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,
@@ -277,6 +282,7 @@ export const bedrockModels = {
 		supportsPromptCache: true,
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 		supportsTemperature: false,
 		inputPrice: 10.0,
 		outputPrice: 50.0,
@@ -287,6 +293,31 @@ export const bedrockModels = {
 		cachableFields: ["system", "messages", "tools"],
 		description:
 			"Claude Fable 5 is Anthropic's most capable widely released model for the most demanding reasoning and long-horizon agentic work.",
+	},
+	// UNVERIFIED: Neither Anthropic's docs nor the AWS Bedrock "Supported models" page
+	// publishes a Bedrock model ID for Mythos 5 (or a -mythos-5-1 variant) as of this
+	// writing. This entry mirrors Fable 5's Bedrock contract (identical adaptive-thinking
+	// shape, 1M default context, 128k max output, same pricing tier) per the Anthropic
+	// migration guide, ported from the pre-re-baseline fork catalog. Confirm the exact
+	// model ID against the AWS console before relying on this entry in production.
+	"anthropic.claude-mythos-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		supportsTemperature: false,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 1.0,
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description:
+			"Claude Mythos 5 - access-gated frontier model (native 1M context, default). UNVERIFIED Bedrock model ID.",
 	},
 	"anthropic.claude-opus-4-5-20251101-v1:0": {
 		maxTokens: 8192,
@@ -676,6 +707,13 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-fable-5-1",
 	"anthropic.claude-fable-5",
 ] as const
+
+// Adaptive-thinking models that accept an explicit `thinking: { type: "disabled" }`
+// request to turn reasoning off entirely. Anthropic's adaptive-thinking contract
+// otherwise always reasons; only Claude Sonnet 5 currently accepts the disabled
+// variant on Bedrock. Sending it to other adaptive models (Opus 4.7/4.8/5, Fable
+// 5/5.1) returns a 400 error, so this list must stay narrow and explicit.
+export const BEDROCK_DISABLEABLE_THINKING_MODEL_IDS = ["anthropic.claude-sonnet-5"] as const
 
 // Amazon Bedrock Service Tier types
 export type BedrockServiceTier = "STANDARD" | "FLEX" | "PRIORITY"
