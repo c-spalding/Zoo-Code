@@ -11,6 +11,10 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
 
+vi.mock("../../../api/providers/bedrock-discovery", () => ({
+	discoverBedrockTargets: vi.fn(),
+}))
+
 vi.mock("../../../integrations/theme/getTheme", () => ({
 	getTheme: vi.fn().mockResolvedValue({}),
 }))
@@ -75,6 +79,7 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
+import { discoverBedrockTargets } from "../../../api/providers/bedrock-discovery"
 import { getCommands } from "../../../services/command/commands"
 import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
 import {
@@ -90,6 +95,7 @@ const { fetchOpenAiCodexRateLimitInfo } = await import("../../../integrations/op
 const mockGetModels = getModels as Mock<typeof getModels>
 const mockFlushModels = flushModels as Mock<typeof flushModels>
 const mockGetLMStudioModels = getLMStudioModels as Mock<typeof getLMStudioModels>
+const mockDiscoverBedrockTargets = discoverBedrockTargets as Mock<typeof discoverBedrockTargets>
 const mockGetCommands = vi.mocked(getCommands)
 const mockGetAccessToken = vi.mocked(openAiCodexOAuthManager.getAccessToken)
 const mockGetAccountId = vi.mocked(openAiCodexOAuthManager.getAccountId)
@@ -497,6 +503,104 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
 			ollamaModels: mockModels,
+		})
+	})
+})
+
+describe("webviewMessageHandler - requestBedrockDiscovery", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockDiscoverBedrockTargets.mockReset()
+	})
+
+	it("posts an empty discovery list without calling discoverBedrockTargets when awsRegion is not configured", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestBedrockDiscovery",
+			requestId: "req-1",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.bedrock,
+			},
+		})
+
+		expect(mockDiscoverBedrockTargets).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "bedrockDiscovery",
+			requestId: "req-1",
+			bedrockDiscovery: [],
+		})
+	})
+
+	it("discovers Bedrock targets and posts them back with the request id", async () => {
+		const mockTargets = [
+			{
+				id: "anthropic.claude-sonnet-5",
+				label: "Claude Sonnet 5",
+				baseModelId: "anthropic.claude-sonnet-5",
+				targetKind: "foundation-model" as const,
+				contextWindow: 200_000,
+				contextSource: "known" as const,
+			},
+		]
+
+		mockDiscoverBedrockTargets.mockResolvedValue(mockTargets)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestBedrockDiscovery",
+			requestId: "req-2",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.bedrock,
+				awsRegion: "us-east-1",
+			},
+		})
+
+		expect(mockDiscoverBedrockTargets).toHaveBeenCalledWith({
+			apiProvider: providerIdentifiers.bedrock,
+			awsRegion: "us-east-1",
+		})
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "bedrockDiscovery",
+			requestId: "req-2",
+			bedrockDiscovery: mockTargets,
+		})
+	})
+
+	it("posts an empty discovery list with an error message when discoverBedrockTargets throws", async () => {
+		mockDiscoverBedrockTargets.mockRejectedValue(new Error("boom"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestBedrockDiscovery",
+			requestId: "req-3",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.bedrock,
+				awsRegion: "us-east-1",
+			},
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "bedrockDiscovery",
+			requestId: "req-3",
+			bedrockDiscovery: [],
+			error: "boom",
+		})
+	})
+
+	it("stringifies non-Error rejections from discoverBedrockTargets", async () => {
+		mockDiscoverBedrockTargets.mockRejectedValue("string failure")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestBedrockDiscovery",
+			requestId: "req-4",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.bedrock,
+				awsRegion: "us-east-1",
+			},
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "bedrockDiscovery",
+			requestId: "req-4",
+			bedrockDiscovery: [],
+			error: "string failure",
 		})
 	})
 })

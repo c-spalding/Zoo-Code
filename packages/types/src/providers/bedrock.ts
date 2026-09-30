@@ -1,6 +1,19 @@
+import { z } from "zod"
+
 import type { ModelInfo } from "../model.js"
 
 // https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference.html
+
+// T4: Bedrock dynamic discovery - request/response message types exchanged between the
+// extension host and the webview (see discoverBedrockTargets in
+// src/api/providers/bedrock-discovery.ts and useBedrockDiscovery in the webview).
+export const bedrockDiscoveryMessageTypes = ["requestBedrockDiscovery", "bedrockDiscovery"] as const
+
+export const bedrockDiscoveryMessageTypeSchema = z.enum(bedrockDiscoveryMessageTypes)
+
+export const BedrockDiscoveryMessageType = bedrockDiscoveryMessageTypeSchema.enum
+
+export type BedrockDiscoveryMessageType = z.infer<typeof bedrockDiscoveryMessageTypeSchema>
 
 export type BedrockModelId = keyof typeof bedrockModels
 
