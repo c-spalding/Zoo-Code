@@ -32,18 +32,19 @@ Implementation order (left to right). "NN" is the branch-name tag; "Upstream sta
 the one-line recon verdict; "Mandatory fixes" lists only the findings this project
 requires before merging the tranche (see section per tranche for the advisory list).
 
-| Order | Branch                         | Tranche                                            | Upstream status (recon)                                                                           | Mandatory fixes carried               |
-| ----- | ------------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md | F-BP-3 (not needed; never introduced) |
-| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                    | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                  | ABSENT/mixed -- depends on T4                                                                     | none mandatory                        |
-| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe              | PARTIAL -- probe logic absent; UI component name collision with upstream                          | none mandatory                        |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode        | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions              | ABSENT -- clean, but migration logic needs re-diff                                                | none mandatory                        |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                   | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                      | ABSENT, entangled with `tool-use.ts` shape                                                        | F-AI-2, F-AI-3                        |
-| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                    | ABSENT, entangled with T9's `tool-use.ts` changes                                                 | F-LC-1                                |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                              | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                        | none mandatory                        |
+| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                           | Mandatory fixes carried               |
+| ----- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md | F-BP-3 (not needed; never introduced) |
+| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | ABSENT/mixed -- depends on T4                                                                     | none mandatory                        |
+| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | PARTIAL -- probe logic absent; UI component name collision with upstream                          | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                    | none mandatory                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                        | F-AI-2, F-AI-3                        |
+| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                 | F-LC-1                                |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                        | none mandatory                        |
+| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)    | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -984,7 +985,168 @@ re-baseline project itself, not because of any technical dependency.
 
 ---
 
-## 13. Dropped / superseded
+## 13. T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A
+
+**Order:** 11th (branch `fork/11-new-bedrock-models`, cut from `feature/zoo-base` after
+the 2026-09-21 resync). Not part of the original 10-tranche code review; added later as
+AWS Bedrock published three new model families.
+
+**Status: phase A implemented on `fork/11-new-bedrock-models`, not yet merged.** Commits
+(oldest to newest): `205371f84` (catalog entries + mandatory-profile id list),
+`b78a87f5f` (mandatory inference-profile handler logic), `5c6e94afb` (unit tests),
+`8c740ffcd` (reasoning-effort probe script). **Phase B (reasoning-effort payload wiring)
+is deliberately deferred** -- see "Phase B: gated on probe results" below.
+
+### Purpose
+
+Adds catalog support for three new Bedrock model families that AWS added after the
+2026-09-21 resync: OpenAI GPT-5.6 (Sol/Terra/Luna), OpenAI GPT-6 (Astra/Sol/Luna), and
+Moonshot Kimi K3 (`moonshotai.kimi-k3` -- distinct from the existing
+`moonshot.kimi-k2-thinking` entry). All seven of these ids share a trait none of the
+existing catalog entries have: AWS does not allow on-demand invocation of the bare
+model id on `bedrock-runtime` at all -- an inference profile prefix (regional or
+`global.`) is **mandatory**, not an opt-in convenience the way cross-region/Global
+Inference is for every other model in the catalog. User-facing benefit: these models
+appear in the model picker and work correctly out of the box, without the user needing
+to know they must separately enable cross-region or Global inference first (which,
+for every other model, is the only way prefixes get added).
+
+### Provider-setting / global-setting keys
+
+None new. Reuses the existing `awsUseCrossRegionInference` / `awsUseGlobalInference` /
+`awsRegion` settings -- the mandatory-profile logic is a fallback that only activates
+when neither of those has already produced a prefix.
+
+### Principal files
+
+| File                                                                                                                 | New/Modified                                                                                                                 | Status       |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                 | Modified -- 7 catalog entries, `BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS` updated | Phase A done |
+| [`src/api/providers/bedrock.ts`](src/api/providers/bedrock.ts)                                                       | Modified -- mandatory-profile fallback branch in `getModel()`                                                                | Phase A done |
+| [`packages/types/src/__tests__/bedrock-t11-models.test.ts`](packages/types/src/__tests__/bedrock-t11-models.test.ts) | New -- catalog registry-invariant and exact-value tests                                                                      | Phase A done |
+| [`src/api/providers/__tests__/bedrock.spec.ts`](src/api/providers/__tests__/bedrock.spec.ts)                         | Modified -- mandatory-profile handler-logic tests                                                                            | Phase A done |
+| [`scripts/probe-bedrock-reasoning.mjs`](scripts/probe-bedrock-reasoning.mjs)                                         | New -- manual diagnostic script, not part of CI                                                                              | Phase A done |
+
+### Source commits on `fork/11-new-bedrock-models`
+
+| Commit      | Subject                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------- |
+| `205371f84` | `feat(bedrock): add GPT-5.6/GPT-6/Kimi K3 catalog entries and mandatory-profile id list`    |
+| `b78a87f5f` | `feat(bedrock): apply mandatory inference-profile prefix for GPT-5.6/6 and Kimi K3`         |
+| `5c6e94afb` | `test(bedrock): cover mandatory inference-profile logic and T11 catalog sanity`             |
+| `8c740ffcd` | `feat(bedrock): add scripts/probe-bedrock-reasoning.mjs for reasoning-effort payload probe` |
+
+### Upstream status per recon (drop/keep/adapt)
+
+N/A -- this is new fork content, not a re-application of anything from
+`archive/zoo-base-3.56`. These model families did not exist when the original recon was
+performed. No upstream comparison applies; this is a from-scratch addition on top of
+BASE.
+
+### Catalog metadata caveats (read before trusting any number below)
+
+AWS's model cards for these three families are noticeably less complete than for
+established models. Every catalog entry marks its unverified fields with an inline
+comment; the two categories of caveat that recur across all seven entries:
+
+- **`maxTokens` is unverified for 6 of the 7 entries** (all except GPT-6 Astra, which AWS
+  states directly as 128,000). The other six borrow 128,000 (GPT-5.6/6 family) or
+  131,072 (Kimi K3, from the non-Bedrock `moonshot.ts` K3 entry) as a placeholder. If a
+  user reports truncated output shorter than expected, check this value first.
+- **Reasoning-effort support is inconsistent and mostly undocumented.** Only GPT-6 Sol
+  and GPT-6 Luna have an AWS-documented effort allow-list
+  (`none/low/medium/high/xhigh/max`, default `medium`); GPT-5.6 Sol/Terra/Luna and GPT-6
+  Astra have no "reasoning effort" section on their AWS model cards at all (a
+  documentation gap, not a confirmed absence of the feature); Kimi K3's reasoning is
+  always-on with no effort control documented. **Phase A deliberately omits
+  `supportsReasoningEffort` wherever AWS does not explicitly document it**, rather than
+  guessing.
+
+### Phase B: gated on probe results (not yet started)
+
+Phase A is catalog metadata and mandatory-profile routing only. **Actually sending a
+reasoning-effort value on the Converse API is phase B, and is deliberately not
+implemented yet**, because AWS's Converse documentation does not specify the payload
+shape for `additionalModelRequestFields` on these models -- it could be a flat
+`reasoning_effort: "..."` field, a nested `reasoning: { effort: "..." }` object, or
+something else entirely; sending the wrong shape risks a 400 error for every user of
+these models. `scripts/probe-bedrock-reasoning.mjs` was built to answer this
+empirically before writing any phase B payload code. It has **not yet been run against
+real AWS credentials** -- this was built and dry-run-verified in a sandbox with no AWS
+credentials configured.
+
+**To unblock phase B, run the probe** (PowerShell, from the repo root, with AWS
+credentials configured via any of the SDK's standard mechanisms -- `AWS_PROFILE`,
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an SSO session):
+
+```powershell
+# GPT-6 Sol -- has an AWS-documented effort allow-list; resolves Q1 (payload shape) and Q2 (whether the shape works at all)
+node scripts/probe-bedrock-reasoning.mjs --model openai.gpt-6-sol --region us-east-1 --yes
+
+# Kimi K3 -- also runs the multi-turn reasoning-echo test (e-k3-multiturn) to check for
+# the documented InternalServerException risk when reasoning content is echoed back
+node scripts/probe-bedrock-reasoning.mjs --model moonshotai.kimi-k3 --region us-east-1 --yes
+```
+
+Each invocation places at most 6 small Converse calls (`max_tokens` ~200 each); AWS's
+own list pricing puts the total cost for both commands combined at well under US$0.05.
+Omit `--yes` first to see the dry-run plan (model id with profile prefix, tests that
+will run, and the cost estimate) with no AWS calls made. Run `node
+scripts/probe-bedrock-reasoning.mjs --help` for the full flag list (`--region`,
+`--profile-prefix`, `--effort`, `--max-tokens`, `--stream`, `--skip-k3-multiturn`).
+
+**What each probe outcome decides for phase B:**
+
+- If `b-flat-effort` succeeds and `c-nested-effort` fails (or vice versa): phase B sends
+  exactly that shape and drops the other.
+- If both `b-flat-effort` and `c-nested-effort` fail with a 400/validation error: neither
+  shape is accepted on Converse for these models; phase B either finds a third shape
+  from the error text or documents that reasoning-effort control is unavailable via
+  Converse for these models (matching AWS's own recommendation, noted in the K3 catalog
+  entry's description, to prefer the OpenAI-compatible API over Converse for K3).
+- `d-illegal-effort`'s error text (if any test succeeds at all) is read to confirm the
+  exact enum AWS validates against, in case it differs from what the model card states.
+- For K3 specifically: if `e-k3-multiturn`'s turn 2 throws `InternalServerException`,
+  that confirms the catalog's existing decision to omit `preserveReasoning` on the K3
+  entry (already implemented in phase A) is correct and should stay; if it succeeds, it
+  means the K3 model card's warning is either historical or region/version-specific, and
+  the extension might safely revisit adding `preserveReasoning` in phase B.
+
+### Known defects to fix during re-application
+
+None yet identified -- this is new content, not a re-application, so there is no
+existing defect list to carry over. Re-check this section once phase B lands.
+
+### Dependencies on other tranches
+
+None. Independent of every other tranche; only depends on the existing cross-region/
+Global-inference prefix infrastructure already present at BASE (`getPrefixForRegion()`,
+`AWS_INFERENCE_PROFILE_MAPPING`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS`), which phase A
+reuses rather than duplicating.
+
+### Before upstream submission checklist
+
+- [ ] Run the probe script against real AWS credentials and record the actual result
+      (payload shape confirmed, or documented as unavailable) before writing any phase B
+      code -- do not upstream phase A alone without at least attempting phase B, since a
+      catalog entry with no working reasoning-effort control for a model that advertises
+      one is a lesser but still incomplete contribution.
+- [ ] Implement and test phase B once probe results are in; update this section's
+      "Phase B" status accordingly.
+- [ ] Open GitHub issue, comment "Claiming", get Discord assignment before opening a PR.
+- [ ] Branch rebased onto `zoo/main`.
+- [ ] i18n: none needed (no new UI strings; reuses the existing effort-dropdown pattern).
+- [ ] `.changeset/` entry, `minor` impact (new models, no breaking change).
+- [ ] Re-verify every "unverified" `maxTokens` value and reasoning-effort omission
+      against AWS's model cards at submission time -- these families are new and AWS's
+      documentation may have been filled in since phase A was written.
+- [ ] Confirm `src/eslint-suppressions.json` suppression counts for
+      `api/providers/bedrock.ts` and `api/providers/__tests__/bedrock.spec.ts` are still
+      at their phase-A baseline (34 and 38 respectively) -- unchanged by this tranche.
+
+---
+
+## 14. Dropped / superseded
 
 Features intentionally **not** carried into the re-baseline, with the recon evidence
 that justifies dropping each one.
@@ -998,7 +1160,7 @@ that justifies dropping each one.
 | Model catalog entries: `opus-4-7`, `opus-4-8`, `fable-5`, `fable-5-1`, `sonnet-5` | Already present at BASE                                          | Recon feature #10 -- all five confirmed present in `packages/types/src/providers/bedrock.ts` at BASE.                                                                                                                                                                                                                     |
 | `"max"` reasoning-effort enum value                                               | Already present at BASE, byte-for-byte identical list            | Recon feature #9 -- `reasoningEffortsExtended` and `reasoningEffortSettingValues` at BASE already include `"max"`.                                                                                                                                                                                                        |
 
-## 14. Deferred / watch list
+## 15. Deferred / watch list
 
 Open items that need attention but are not blocking any tranche's re-application.
 
@@ -1054,7 +1216,7 @@ schedule.
   (`da257010e`); also worth a standalone upstream PR per recon's explicit suggestion.
   (upstream-recon.md feature #12, section 5 item 6.)
 
-## 15. Update discipline
+## 16. Update discipline
 
 This file is the source of truth for what this fork carries on top of upstream. Every
 tranche merge into `feature/zoo-base`, and every future re-sync against a newer upstream
@@ -1066,14 +1228,14 @@ release, **must** update this file in the same PR/merge:
   at the commit level because the source history squashed multiple tranches into one
   commit -- once re-split, record the real provenance here).
 - When a future re-sync recon (a new `upstream-recon-vX.Y.Z.md` snapshot) is produced,
-  re-check every row in section 13 (Dropped/superseded) and section 14 (Deferred/watch
+  re-check every row in section 14 (Dropped/superseded) and section 15 (Deferred/watch
   list) against the new upstream state -- a dropped feature can un-supersede itself if
   upstream reverts, and a watch-list bug can get fixed upstream and drop off the list.
 - Do not let this file drift silently. If a tranche's re-applied code ends up differing
   materially from what its section here describes, update the section as part of that
   tranche's own PR, not as a separate cleanup pass.
 
-## 16. Resync log 2026-09-21
+## 17. Resync log 2026-09-21
 
 **Old base:** upstream `v3.82.0`, `134923e15` (2026-09-10 re-baseline).
 **New base:** `zoo/main` tip `01928c3c4` (`v3.82.2` + 14 unreleased commits, 2026-09-21).
