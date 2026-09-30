@@ -970,3 +970,464 @@ export const BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS = [
 	"openai.gpt-6-luna",
 	"moonshotai.kimi-k3",
 ] as const
+
+// -----------------------------------------------------------------------------------
+// T4: Bedrock dynamic discovery - shared pure helpers
+//
+// None of the models in BEDROCK_1M_CONTEXT_MODEL_IDS above default into their 1M tier;
+// every one of them ships at a 200K contextWindow and requires either the opt-in
+// `awsBedrock1MContext` toggle or a `:1m`-suffixed discovery target id to reach 1M. Models
+// that are natively 1M by default (e.g. Claude Sonnet 5, Opus 5, Fable 5/5.1) already carry
+// contextWindow: 1_000_000 directly in their bedrockModels catalog entry and never appear in
+// BEDROCK_1M_CONTEXT_MODEL_IDS, so this default list stays empty. It exists (rather than being
+// inlined as `[]`) so the "opt-in" derivation below reads as intentional, and so a future model
+// that ships 1M-by-default-but-still-needs-a-catalog-entry-in-this-list has an obvious place to
+// be added without touching every call site that filters on "is this opt-in".
+export const BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS = [] as const
+
+export const BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS = BEDROCK_1M_CONTEXT_MODEL_IDS.filter(
+	(modelId) => !(BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS as readonly string[]).includes(modelId),
+)
+
+export type BedrockInvokeTargetKind =
+	| "foundation-model"
+	| "system-profile"
+	| "application-profile"
+	| "custom-arn"
+	| "prompt-router"
+	| "unknown"
+
+export type BedrockContextSource = "default-1m" | "profile-id" | "toggle" | "base"
+
+export interface BedrockDiscoveredTarget {
+	id: string
+	label: string
+	baseModelId: string
+	targetKind: Extract<BedrockInvokeTargetKind, "foundation-model" | "system-profile" | "application-profile">
+	contextWindow: number
+	contextSource: BedrockContextSource
+	description?: string
+	arn?: string
+	region?: string
+	status?: string
+	isGlobal?: boolean
+	isCrossRegion?: boolean
+	supportsImages?: boolean
+	supportsPromptCache?: boolean
+}
+
+type ParsedBedrockArn = {
+	isArn: boolean
+	region?: string
+	modelType?: string
+	resourceId?: string
+}
+
+const BEDROCK_PROFILE_PREFIXES = Array.from(
+	new Set(["global.", ...AWS_INFERENCE_PROFILE_MAPPING.map(([, prefix]) => prefix)]),
+)
+
+const BEDROCK_1M_SUFFIX_PATTERNS = [/\[1m\]$/i, /:1m(?::fast)?$/i]
+
+const cloneModelInfo = (info: ModelInfo): ModelInfo => ({
+	...info,
+	cachableFields: info.cachableFields ? [...info.cachableFields] : undefined,
+	excludedTools: info.excludedTools ? [...info.excludedTools] : undefined,
+	includedTools: info.includedTools ? [...info.includedTools] : undefined,
+	supportedParameters: info.supportedParameters ? [...info.supportedParameters] : undefined,
+	tiers: info.tiers?.map((tier) => ({ ...tier })),
+	longContextPricing: info.longContextPricing ? { ...info.longContextPricing } : undefined,
+})
+
+export const stripBedrock1MContextSuffix = (targetId: string) =>
+	BEDROCK_1M_SUFFIX_PATTERNS.reduce((value, pattern) => value.replace(pattern, ""), targetId.trim())
+
+export const hasBedrock1MContextIndicator = (targetId?: string) => {
+	if (!targetId) {
+		return false
+	}
+
+	const normalized = targetId.trim().toLowerCase()
+	return BEDROCK_1M_SUFFIX_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
+/**
+ * Given a list of Bedrock targets, expand each 1M-capable entry into two dropdown
+ * choices: the original (default context) and a synthetic twin with `:1m` appended
+ * to its id, a (1M context) label suffix, and context-window/pricing from the 1M tier.
+ *
+ * The runtime recognizes `:1m` via {@link hasBedrock1MContextIndicator} and strips it
+ * via {@link stripBedrock1MContextSuffix}, so the synthetic id round-trips correctly.
+ *
+ * Used by both the static fallback target list in the webview and by
+ * `discoverBedrockTargets` on the extension side, so AWS discovery producing a single
+ * profile still yields two dropdown choices (since the inference profile id is
+ * identical for 128K/200K and 1M).
+ */
+export const expandBedrockTargetsWith1MVariants = (targets: BedrockDiscoveredTarget[]): BedrockDiscoveredTarget[] => {
+	const oneMillionCapable = new Set<string>(BEDROCK_1M_CONTEXT_MODEL_IDS as readonly string[])
+	const result: BedrockDiscoveredTarget[] = []
+
+	for (const target of targets) {
+		result.push(target)
+
+		if (!oneMillionCapable.has(target.baseModelId)) {
+			continue
+		}
+
+		// Skip if the incoming target ALREADY represents a 1M variant (avoid double-adding).
+		if (hasBedrock1MContextIndicator(target.id) || target.contextWindow >= 1_000_000) {
+			continue
+		}
+
+		const modelInfo = bedrockModels[target.baseModelId as keyof typeof bedrockModels] as ModelInfo | undefined
+		const tier = modelInfo?.tiers?.[0]
+		const oneMContextWindow = tier?.contextWindow ?? 1_000_000
+
+		result.push({
+			...target,
+			id: `${target.id}:1m`,
+			label: `${target.label} (1M context)`,
+			contextWindow: oneMContextWindow,
+			contextSource: "profile-id",
+		})
+	}
+
+	return result
+}
+
+export const parseBedrockArn = (targetId?: string): ParsedBedrockArn => {
+	if (!targetId?.startsWith("arn:")) {
+		return { isArn: false }
+	}
+
+	const arnRegex = /^arn:[^:]+:(?:bedrock|sagemaker):([^:]+):([^:]*):(?:([^/]+)\/([\w.\-:]+)|([^/]+))$/
+	const match = targetId.match(arnRegex)
+
+	if (!match) {
+		return { isArn: true }
+	}
+
+	return {
+		isArn: true,
+		region: match[1],
+		modelType: match[3],
+		resourceId: match[4],
+	}
+}
+
+export const parseBedrockBaseModelId = (targetId: string): string => {
+	if (!targetId) {
+		return targetId
+	}
+
+	const normalizedTargetId = stripBedrock1MContextSuffix(targetId)
+	const parsedArn = parseBedrockArn(normalizedTargetId)
+	const value = parsedArn.resourceId ?? normalizedTargetId
+
+	for (const prefix of BEDROCK_PROFILE_PREFIXES) {
+		if (value.startsWith(prefix)) {
+			return value.substring(prefix.length)
+		}
+	}
+
+	return value
+}
+
+export const inferBedrockInvokeTargetKind = ({
+	targetId,
+	explicitKind,
+}: {
+	targetId?: string
+	explicitKind?: BedrockInvokeTargetKind
+}): BedrockInvokeTargetKind => {
+	if (explicitKind) {
+		return explicitKind
+	}
+
+	if (!targetId) {
+		return "unknown"
+	}
+
+	if (targetId.startsWith("arn:")) {
+		const parsedArn = parseBedrockArn(targetId)
+		switch (parsedArn.modelType) {
+			case "foundation-model":
+				return "foundation-model"
+			case "inference-profile":
+				if (
+					parsedArn.resourceId &&
+					BEDROCK_PROFILE_PREFIXES.some((prefix) => parsedArn.resourceId!.startsWith(prefix))
+				) {
+					return "system-profile"
+				}
+				return "application-profile"
+			case "application-inference-profile":
+				return "application-profile"
+			case "default-prompt-router":
+			case "prompt-router":
+				return "prompt-router"
+			default:
+				return "custom-arn"
+		}
+	}
+
+	if (
+		targetId.startsWith("global.") ||
+		AWS_INFERENCE_PROFILE_MAPPING.some(([, prefix]) => targetId.startsWith(prefix))
+	) {
+		return "system-profile"
+	}
+
+	return "foundation-model"
+}
+
+export const usesBedrockDefault1MContext = (baseModelId?: string) =>
+	!!baseModelId &&
+	BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_DEFAULT_MODEL_IDS)[number])
+
+const getBedrockRegionPrefix = (region?: string): string | undefined => {
+	if (!region) return undefined
+	for (const [pattern, prefix] of AWS_INFERENCE_PROFILE_MAPPING) {
+		if (region.startsWith(pattern)) return prefix
+	}
+	return undefined
+}
+
+/**
+ * Returns the AWS-side target id that the Bedrock runtime would invoke against, given a
+ * provider-settings snapshot. Mirrors the resolution `AwsBedrockHandler.getModel()` does
+ * before sending a Converse command, so that callers outside the runtime can compute the
+ * exact same target the user's profile is configured to invoke.
+ *
+ * Resolution order:
+ *  1. `awsCustomArn` wins if present (the user provided a literal ARN).
+ *  2. If `awsBedrockTargetKind` (or the inferred kind) is an explicit profile / prompt
+ *     router selection, use `awsBedrockInvokeTarget` verbatim, stripping the synthetic
+ *     `:1m` UI suffix.
+ *  3. Otherwise we have a foundation-model selection. Apply Global Inference (`global.`)
+ *     when enabled and supported, else apply the regional cross-region inference prefix
+ *     (`us.`, `eu.`, etc.) when enabled.
+ */
+export interface ResolveBedrockInvokeTargetIdOptions {
+	awsCustomArn?: string
+	awsBedrockInvokeTarget?: string
+	awsBedrockTargetKind?: BedrockInvokeTargetKind
+	apiModelId?: string
+	awsUseGlobalInference?: boolean
+	awsUseCrossRegionInference?: boolean
+	awsRegion?: string
+}
+
+export const resolveBedrockInvokeTargetId = (options: ResolveBedrockInvokeTargetIdOptions): string => {
+	if (options.awsCustomArn) {
+		return options.awsCustomArn
+	}
+
+	const configuredTargetId = options.awsBedrockInvokeTarget || options.apiModelId || ""
+	const explicitKind = options.awsBedrockTargetKind
+	const targetKind = inferBedrockInvokeTargetKind({
+		targetId: configuredTargetId,
+		explicitKind,
+	})
+
+	if (
+		targetKind === "system-profile" ||
+		targetKind === "application-profile" ||
+		targetKind === "prompt-router" ||
+		targetKind === "custom-arn"
+	) {
+		return stripBedrock1MContextSuffix(configuredTargetId)
+	}
+
+	const baseModelId = parseBedrockBaseModelId(configuredTargetId)
+
+	if (
+		options.awsUseGlobalInference &&
+		BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_GLOBAL_INFERENCE_MODEL_IDS)[number])
+	) {
+		return `global.${baseModelId}`
+	}
+
+	if (options.awsUseCrossRegionInference) {
+		const prefix = getBedrockRegionPrefix(options.awsRegion)
+		if (prefix) {
+			return `${prefix}${baseModelId}`
+		}
+	}
+
+	return baseModelId
+}
+
+export const shouldUseBedrock1MContext = ({
+	targetId,
+	baseModelId,
+	optIn1MContext,
+}: {
+	targetId?: string
+	baseModelId?: string
+	optIn1MContext?: boolean
+}): { enabled: boolean; source: BedrockContextSource } => {
+	if (hasBedrock1MContextIndicator(targetId)) {
+		return { enabled: true, source: "profile-id" }
+	}
+
+	if (usesBedrockDefault1MContext(baseModelId)) {
+		return { enabled: true, source: "default-1m" }
+	}
+
+	if (
+		optIn1MContext &&
+		baseModelId &&
+		BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_MODEL_IDS)[number])
+	) {
+		return { enabled: true, source: "toggle" }
+	}
+
+	return { enabled: false, source: "base" }
+}
+
+/**
+ * Fallback heuristic used by {@link resolveBedrockModelInfo} when a target/base model id is
+ * not present in the static `bedrockModels` catalog (e.g. a brand-new foundation model AWS
+ * discovery surfaced before the catalog was updated). Mirrors the equivalent private
+ * `guessModelInfoFromId` logic historically kept inline on `AwsBedrockHandler` so both the
+ * runtime and any caller of the pure resolver (webview `useSelectedModel`, discovery module)
+ * make the same guess.
+ */
+export const guessBedrockModelInfoFromId = (modelId: string): Partial<ModelInfo> => {
+	const modelConfigMap: Record<string, Partial<ModelInfo>> = {
+		"claude-4": {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-7": {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-5": {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-4-opus": {
+			maxTokens: 4096,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-opus": {
+			maxTokens: 4096,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-haiku": {
+			maxTokens: 4096,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+	}
+
+	const normalizedId = modelId.toLowerCase()
+	for (const [pattern, config] of Object.entries(modelConfigMap)) {
+		if (normalizedId.includes(pattern)) {
+			return config
+		}
+	}
+
+	return {
+		maxTokens: BEDROCK_MAX_TOKENS,
+		contextWindow: BEDROCK_DEFAULT_CONTEXT,
+		supportsImages: false,
+		supportsPromptCache: false,
+	}
+}
+
+/**
+ * Resolves the effective {@link ModelInfo} for a Bedrock invocation target, applying (in
+ * order): the static catalog entry (or the heuristic fallback for unknown ids), the 1M
+ * context-window/pricing tier when applicable, a static max-output-tokens override (e.g. a
+ * future empirically-probed cap), and finally the request-time `modelMaxTokens` slider value
+ * (which always wins, so users can still request fewer tokens than the model's headroom).
+ *
+ * This is the single source of truth shared by `AwsBedrockHandler.getModelById()` (runtime),
+ * `discoverBedrockTargets` (extension-side discovery), and `useSelectedModel` (webview), so
+ * all three surfaces agree on context-window/pricing for a given target.
+ */
+export const resolveBedrockModelInfo = ({
+	baseModelId,
+	targetId,
+	optIn1MContext,
+	modelMaxTokens,
+	contextWindowOverride,
+	maxOutputTokensOverride,
+}: {
+	baseModelId?: string
+	targetId?: string
+	optIn1MContext?: boolean
+	// Request-time "how many tokens to ask for" knob (slider value). Mirrors historic behaviour.
+	modelMaxTokens?: number
+	contextWindowOverride?: number
+	// Static cap override (e.g. an empirically-detected max-output-tokens value). When set,
+	// this widens the effective `info.maxTokens` ceiling that downstream UI and request
+	// builders see, even if the user has not explicitly bumped the slider. Not currently wired
+	// to any provider-setting field (that lands in a later tranche); the parameter exists so
+	// this resolver's contract doesn't need to change when it is.
+	maxOutputTokensOverride?: number
+}): { baseModelId: string; info: ModelInfo; uses1MContext: boolean; contextSource: BedrockContextSource } => {
+	const resolvedBaseModelId = parseBedrockBaseModelId(baseModelId || targetId || bedrockDefaultModelId)
+
+	const baseInfo =
+		resolvedBaseModelId in bedrockModels
+			? cloneModelInfo(bedrockModels[resolvedBaseModelId as keyof typeof bedrockModels])
+			: {
+					...cloneModelInfo(bedrockModels[bedrockDefaultModelId]),
+					...guessBedrockModelInfoFromId(resolvedBaseModelId),
+				}
+
+	const oneMillionContext = shouldUseBedrock1MContext({
+		targetId,
+		baseModelId: resolvedBaseModelId,
+		optIn1MContext,
+	})
+
+	let info: ModelInfo = baseInfo
+	if (oneMillionContext.enabled) {
+		const tier = info.tiers?.[0]
+		info = {
+			...info,
+			contextWindow: tier?.contextWindow ?? 1_000_000,
+			inputPrice: tier?.inputPrice ?? info.inputPrice,
+			outputPrice: tier?.outputPrice ?? info.outputPrice,
+			cacheWritesPrice: tier?.cacheWritesPrice ?? info.cacheWritesPrice,
+			cacheReadsPrice: tier?.cacheReadsPrice ?? info.cacheReadsPrice,
+		}
+	}
+
+	// Apply the static-cap override BEFORE the request-time `modelMaxTokens` so users can
+	// explicitly request fewer tokens than the model's headroom (e.g. cost control) without
+	// having the override silently clobber their slider value.
+	if (maxOutputTokensOverride && maxOutputTokensOverride > 0) {
+		info.maxTokens = maxOutputTokensOverride
+	}
+	if (modelMaxTokens && modelMaxTokens > 0) {
+		info.maxTokens = modelMaxTokens
+	}
+	if (contextWindowOverride && contextWindowOverride > 0) {
+		info.contextWindow = contextWindowOverride
+	}
+
+	return {
+		baseModelId: resolvedBaseModelId,
+		info,
+		uses1MContext: oneMillionContext.enabled,
+		contextSource: oneMillionContext.source,
+	}
+}
