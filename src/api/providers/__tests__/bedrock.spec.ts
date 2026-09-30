@@ -600,6 +600,194 @@ describe("AwsBedrockHandler", () => {
 				expect(result.errorMessage).toContain("Region mismatch")
 			})
 		})
+
+		describe("T11 mandatory inference profile models (GPT-5.6/6 family, Kimi K3)", () => {
+			// These models cannot be invoked on-demand via their base id on
+			// bedrock-runtime; AWS requires an inference profile prefix even when
+			// the user has opted into neither Global nor cross-region inference.
+			// See BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS and the
+			// getModel() handling in ../bedrock.ts.
+
+			it("applies the region-specific prefix when no profile setting is opted into (us-east-1 -> us.)", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "openai.gpt-6-sol",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("us.openai.gpt-6-sol")
+			})
+
+			it("applies the region-specific prefix for a different supported region (eu-west-1 -> eu.)", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "openai.gpt-6-astra",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "eu-west-1",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("eu.openai.gpt-6-astra")
+			})
+
+			it("falls back to the global. prefix when the region is unset", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "moonshotai.kimi-k3",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("global.moonshotai.kimi-k3")
+			})
+
+			it("falls back to the global. prefix when the region has no entry in the prefix table", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "openai.gpt-5.6-luna",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "unknown-region",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("global.openai.gpt-5.6-luna")
+			})
+
+			it("applies the mandatory prefix even when cross-region inference is left disabled (default)", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "openai.gpt-5.6-terra",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+					awsUseCrossRegionInference: false,
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("us.openai.gpt-5.6-terra")
+			})
+
+			it("does not double-prefix when the user has already opted into cross-region inference for a supported region", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "openai.gpt-6-luna",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+					awsUseCrossRegionInference: true,
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("us.openai.gpt-6-luna")
+			})
+
+			it("does not double-prefix when the user has already opted into Global Inference", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "moonshotai.kimi-k3",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+					awsUseGlobalInference: true,
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("global.moonshotai.kimi-k3")
+			})
+
+			it("leaves an already-prefixed apiModelId untouched (no double prefix)", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "us.openai.gpt-6-sol",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("us.openai.gpt-6-sol")
+			})
+
+			it("leaves a custom foundation-model ARN for a mandatory-profile model untouched", () => {
+				const handler = new AwsBedrockHandler({
+					awsCustomArn: "arn:aws:bedrock:us-east-1::foundation-model/openai.gpt-6-sol",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+				})
+
+				const model = handler.getModel()
+				// Foundation-model ARNs resolve to the base model id (matching the
+				// existing drop-down behaviour), and the mandatory-profile branch
+				// only runs in the non-ARN branch of getModel(), so no prefix is
+				// added here even though this id is in the mandatory-profile list.
+				expect(model.id).toBe("openai.gpt-6-sol")
+			})
+
+			it("leaves a custom inference-profile ARN for a mandatory-profile model untouched", () => {
+				const handler = new AwsBedrockHandler({
+					awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.openai.gpt-6-sol",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.openai.gpt-6-sol")
+			})
+
+			it("does not affect non-listed models (existing Claude id gets no mandatory prefix)", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("anthropic.claude-sonnet-4-5-20250929-v1:0")
+			})
+
+			it("still respects the opt-in cross-region setting normally for non-mandatory-profile models", () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+					awsAccessKey: "test",
+					awsSecretKey: "test",
+					awsRegion: "us-east-1",
+					awsUseCrossRegionInference: true,
+				})
+
+				const model = handler.getModel()
+				expect(model.id).toBe("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+			})
+
+			it.each(["openai.gpt-5.6-sol", "openai.gpt-5.6-terra", "openai.gpt-5.6-luna"])(
+				"applies the mandatory global. fallback prefix for %s when region is unset",
+				(apiModelId) => {
+					const handler = new AwsBedrockHandler({
+						apiModelId,
+						awsAccessKey: "test",
+						awsSecretKey: "test",
+					})
+
+					const model = handler.getModel()
+					expect(model.id).toBe(`global.${apiModelId}`)
+				},
+			)
+
+			it.each(["openai.gpt-6-astra", "openai.gpt-6-sol", "openai.gpt-6-luna"])(
+				"applies the region-specific prefix for %s in a supported region (us-east-1 -> us.)",
+				(apiModelId) => {
+					const handler = new AwsBedrockHandler({
+						apiModelId,
+						awsAccessKey: "test",
+						awsSecretKey: "test",
+						awsRegion: "us-east-1",
+					})
+
+					const model = handler.getModel()
+					expect(model.id).toBe(`us.${apiModelId}`)
+				},
+			)
+		})
 	})
 
 	describe("image handling", () => {

@@ -32,6 +32,7 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_DISABLEABLE_THINKING_MODEL_IDS,
+	BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
@@ -1340,18 +1341,46 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
 			const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
+			let profilePrefixApplied = false
 			if (
 				this.options.awsUseGlobalInference &&
 				BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
 			) {
 				modelConfig.id = `global.${baseIdForGlobal}`
+				profilePrefixApplied = true
 			}
 			// Otherwise, add cross-region inference prefix if enabled
 			else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
 				const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
 				if (prefix) {
 					modelConfig.id = `${prefix}${modelConfig.id}`
+					profilePrefixApplied = true
 				}
+			}
+
+			// R1 (mandatory inference profile): some new models (GPT-5.6/6 family,
+			// Kimi K3 - see BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS) cannot be
+			// invoked at all via their base id on bedrock-runtime; AWS requires an
+			// inference profile even when the user has opted into neither Global nor
+			// cross-region inference. This is deliberately a separate `if`, not an
+			// `else if`, so it also covers the case where cross-region inference was
+			// enabled but the configured region has no entry in
+			// AWS_INFERENCE_PROFILE_MAPPING (profilePrefixApplied stays false there
+			// too) - those users would otherwise still send an unprefixed,
+			// unusable id for these models.
+			//
+			// Prefix choice mirrors AwsBedrockHandler.getPrefixForRegion() - the same
+			// region-to-prefix table the opt-in cross-region path above uses - rather
+			// than introducing a second table. Only `us.` and `global.` are confirmed
+			// by AWS for these models (research doc section 1); the other regional
+			// prefixes (au./eu./apac./jp./ca./sa./ug.) are unverified for them, so
+			// falling back to `global.` when the region isn't in the table (or isn't
+			// set) picks the one AWS explicitly documents as broadly available.
+			if (!profilePrefixApplied && isMemberOf(BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS, baseIdForGlobal)) {
+				const prefix =
+					(this.options.awsRegion && AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)) ||
+					"global."
+				modelConfig.id = `${prefix}${modelConfig.id}`
 			}
 		}
 
