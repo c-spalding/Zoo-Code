@@ -2896,4 +2896,173 @@ describe("AwsBedrockHandler", () => {
 			})
 		})
 	})
+
+	describe("GPT-6 Sol/Luna reasoning effort (nested Converse shape)", () => {
+		beforeEach(() => {
+			mockConverseStreamCommand.mockReset()
+		})
+
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+		// Minimal shape used to inspect the additionalModelRequestFields/inferenceConfig
+		// sent to the mocked AWS SDK commands in this describe block.
+		type OpenAiEffortCommandArg = {
+			additionalModelRequestFields?: {
+				thinking?: { type: string }
+				reasoning?: { effort: string }
+				anthropic_beta?: string[]
+			}
+			inferenceConfig?: { temperature?: number }
+			anthropic_version?: string
+		}
+
+		it("should send the nested reasoning.effort shape for GPT-6 Sol with an explicit effort", async () => {
+			const sol = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6-sol",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			})
+
+			const generator = sol.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toEqual({ effort: "high" })
+			// Must NOT use Claude's thinking/anthropic_version contract.
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+			expect(commandArg.anthropic_version).toBeUndefined()
+			// supportsTemperature: false for this family - temperature must be omitted.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should send the nested reasoning.effort shape for GPT-6 Luna with an explicit effort", async () => {
+			const luna = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6-luna",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+			})
+
+			const generator = luna.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toEqual({ effort: "low" })
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should default to medium effort for GPT-6 Sol when no explicit reasoningEffort setting is provided", async () => {
+			// The catalog entry sets reasoningEffort: "medium" as the model default;
+			// shouldUseReasoningEffort() falls back to it when settings don't override.
+			const sol = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6-sol",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const generator = sol.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toEqual({ effort: "medium" })
+		})
+
+		it("should send an explicit effort:none for GPT-6 Sol when reasoning is disabled, rather than omitting the field", async () => {
+			// Omitting the field entirely would let AWS silently default to "medium" -
+			// send an explicit "none" instead so the user's off setting is honoured.
+			const sol = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6-sol",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = sol.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toEqual({ effort: "none" })
+		})
+
+		it("should NOT send reasoning.effort for GPT-5.6 Sol (no documented effort contract) but should still omit temperature", async () => {
+			// GPT-5.6 Sol has no supportsReasoningEffort array in the catalog (doc gap) -
+			// BEDROCK_OPENAI_EFFORT_MODEL_IDS deliberately excludes it. supportsTemperature
+			// is still false for the whole GPT-5.6/6 family, so temperature must still be
+			// omitted independently of the reasoning-effort branch.
+			const gpt56Sol = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-5.6-sol",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			})
+
+			const generator = gpt56Sol.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toBeUndefined()
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should send an explicit effort:none for GPT-6 Luna (non-stream path)", async () => {
+			// completePrompt never enables reasoning explicitly (one-shot, latency-
+			// sensitive calls), so it must always send the explicit disable shape.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const luna = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6-luna",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await luna.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toEqual({ effort: "none" })
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should omit temperature for GPT-5.6 Terra (non-stream path) even without a reasoning-effort branch", async () => {
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const gpt56Terra = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-5.6-terra",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await gpt56Terra.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as OpenAiEffortCommandArg
+
+			expect(commandArg.additionalModelRequestFields?.reasoning).toBeUndefined()
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+	})
 })

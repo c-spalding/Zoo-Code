@@ -468,10 +468,16 @@ export const bedrockModels = {
 	// supportsPromptCache: false for every GPT entry - AWS marks prompt caching
 	// "(Responses API only)" for this family, so the Converse path this extension
 	// uses does not get it despite the pricing tables listing cache rates.
-	// Reasoning-effort payload shape on Converse is UNVERIFIED (see plans/
-	// new-bedrock-models-research.md Q1/R2) - phase A (this) is catalog + mandatory
-	// profile handling only. Do not add thinking/effort payload logic for these ids
-	// yet; that is phase B, gated on scripts/probe-bedrock-reasoning.mjs results.
+	// Reasoning-effort payload shape on Converse: CONFIRMED via
+	// scripts/probe-bedrock-reasoning.mjs against live AWS credentials (2026-09-30) -
+	// GPT-6 Sol accepts the nested `additionalModelRequestFields: { reasoning: { effort } }`
+	// shape and rejects the flat `reasoning_effort` field with
+	// `ValidationException: Unknown parameter: 'reasoning_effort'`. Phase B (see
+	// BEDROCK_OPENAI_EFFORT_MODEL_IDS below and src/api/providers/bedrock.ts
+	// createMessage()/completePrompt()) implements this nested shape for GPT-6
+	// Sol/Luna specifically - the only two entries with an AWS-documented effort
+	// allow-list. GPT-5.6 Sol/Terra/Luna and GPT-6 Astra still have no documented
+	// effort contract (doc gap, see research Q2) and remain catalog-only.
 	"openai.gpt-5.6-sol": {
 		// maxTokens unverified - borrowed from upstream non-Bedrock openai.ts
 		// gpt-5.6-sol entry; the AWS model card is silent on max output tokens.
@@ -555,9 +561,10 @@ export const bedrockModels = {
 		supportsPromptCache: false,
 		supportsTemperature: false,
 		// AWS-documented directly on this model's card: "Set reasoning effort to
-		// none, low, medium, high, xhigh, or max. The default is medium." Catalog
-		// metadata only in this phase (drives the UI dropdown) - the payload branch
-		// that actually sends reasoning_effort is phase B, gated on the probe script.
+		// none, low, medium, high, xhigh, or max. The default is medium." Phase B
+		// (src/api/providers/bedrock.ts) sends this as the confirmed nested
+		// `additionalModelRequestFields: { reasoning: { effort } }` shape - see
+		// BEDROCK_OPENAI_EFFORT_MODEL_IDS below.
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
 		inputPrice: 2.0, // Global CRIS
@@ -889,6 +896,21 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 // variant on Bedrock. Sending it to other adaptive models (Opus 4.7/4.8/5, Fable
 // 5/5.1) returns a 400 error, so this list must stay narrow and explicit.
 export const BEDROCK_DISABLEABLE_THINKING_MODEL_IDS = ["anthropic.claude-sonnet-5"] as const
+
+// GPT models on Bedrock that accept an OpenAI-style `effort` field, sent as the
+// nested `additionalModelRequestFields: { reasoning: { effort } }` shape on
+// Converse (NOT Anthropic's `thinking` block, and NOT a flat `reasoning_effort`
+// field - both confirmed by scripts/probe-bedrock-reasoning.mjs against live AWS
+// credentials on 2026-09-30: the flat field is rejected with `ValidationException:
+// Unknown parameter: 'reasoning_effort'`). Scoped to exactly the two entries with
+// an AWS-documented effort allow-list (see supportsReasoningEffort above) - GPT-5.6
+// Sol/Terra/Luna and GPT-6 Astra have no documented effort contract (doc gap) and
+// are deliberately excluded until AWS documents one. When the user disables
+// reasoning for one of these ids, send an explicit `effort: "none"` rather than
+// omitting the field, so the request doesn't silently fall back to AWS's "medium"
+// default (mirrors the BEDROCK_DISABLEABLE_THINKING_MODEL_IDS explicit-disable
+// pattern above, for the same reason).
+export const BEDROCK_OPENAI_EFFORT_MODEL_IDS = ["openai.gpt-6-sol", "openai.gpt-6-luna"] as const
 
 // Amazon Bedrock Service Tier types
 export type BedrockServiceTier = "STANDARD" | "FLEX" | "PRIORITY"

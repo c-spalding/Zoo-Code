@@ -33,6 +33,7 @@ import {
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_DISABLEABLE_THINKING_MODEL_IDS,
 	BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS,
+	BEDROCK_OPENAI_EFFORT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
@@ -74,6 +75,16 @@ type BedrockAdaptiveEffort = "low" | "medium" | "high" | "xhigh" | "max"
 // the Zoo Code UI; "omitted" keeps thinking internal only (never sent back to the client).
 type BedrockAdaptiveDisplay = "summarized" | "omitted"
 
+// GPT-6 Sol/Luna reasoning-effort levels (Bedrock Converse, `reasoning.effort`).
+// Confirmed via scripts/probe-bedrock-reasoning.mjs against live AWS credentials
+// (2026-09-30): the nested shape `additionalModelRequestFields.reasoning.effort` is
+// accepted; the flat `reasoning_effort` field is rejected with `ValidationException:
+// Unknown parameter: 'reasoning_effort'`. Distinct from BedrockAdaptiveEffort because
+// AWS documents "none" as a valid explicit value for this family, unlike Claude's
+// adaptive-thinking contract (which uses a separate `thinking: { type: "disabled" }`
+// shape instead - see BEDROCK_DISABLEABLE_THINKING_MODEL_IDS).
+type BedrockOpenAiEffort = "none" | "low" | "medium" | "high" | "xhigh" | "max"
+
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
 interface BedrockAdditionalModelFields {
@@ -94,6 +105,11 @@ interface BedrockAdditionalModelFields {
 		  }
 	output_config?: {
 		effort: BedrockAdaptiveEffort
+	}
+	// GPT-6 Sol/Luna reasoning effort (see BEDROCK_OPENAI_EFFORT_MODEL_IDS) - the
+	// nested Converse shape, confirmed distinct from Claude's `thinking`/`output_config`.
+	reasoning?: {
+		effort: BedrockOpenAiEffort
 	}
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
@@ -142,6 +158,35 @@ function normalizeReasoningEffortForBedrock(value: unknown): BedrockAdaptiveEffo
 		return "low"
 	}
 	return undefined
+}
+
+/**
+ * Normalize a user-supplied reasoningEffort setting into a GPT-6 Sol/Luna
+ * effort level (see BEDROCK_OPENAI_EFFORT_MODEL_IDS). Unlike
+ * normalizeReasoningEffortForBedrock, "none" is a valid explicit value here
+ * (AWS documents it directly on these models' cards), and "minimal"/"disable"
+ * map to "none" rather than being dropped, since the caller always wants to
+ * send *some* effort value for these ids (falling back to "none" rather than
+ * omitting the field entirely, so the request never silently defaults to
+ * AWS's "medium").
+ */
+function normalizeReasoningEffortForOpenAiBedrock(value: unknown): BedrockOpenAiEffort {
+	if (typeof value !== "string") {
+		return "none"
+	}
+	const normalizedValue = value.toLowerCase()
+	if (
+		normalizedValue === "none" ||
+		normalizedValue === "low" ||
+		normalizedValue === "medium" ||
+		normalizedValue === "high" ||
+		normalizedValue === "xhigh" ||
+		normalizedValue === "max"
+	) {
+		return normalizedValue
+	}
+	// "minimal", "disable", or anything unrecognized falls back to "none".
+	return "none"
 }
 
 /**
@@ -575,13 +620,41 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				ctx: "bedrock",
 				modelId: modelConfig.id,
 			})
+		} else if (isMemberOf(BEDROCK_OPENAI_EFFORT_MODEL_IDS, baseModelId)) {
+			// GPT-6 Sol/Luna: OpenAI-style reasoning effort, sent as the nested
+			// Converse shape `additionalModelRequestFields.reasoning.effort` (NOT
+			// Claude's thinking/output_config, and NOT a flat reasoning_effort field -
+			// both confirmed by scripts/probe-bedrock-reasoning.mjs against live AWS
+			// credentials on 2026-09-30). This branch deliberately does not set
+			// thinkingEnabled, so no anthropic_version is added for these ids.
+			// modelConfig.reasoningEffort is already resolved by getModel() via the
+			// generic shouldUseReasoningEffort()/getModelParams() pipeline (undefined
+			// when reasoning is disabled, set to "disable", or set to a value outside
+			// this model's allow-list). Always send an explicit effort value (falling
+			// back to "none") rather than omitting the field entirely, so the request
+			// never silently defaults to AWS's "medium".
+			const openAiEffort = normalizeReasoningEffortForOpenAiBedrock(modelConfig.reasoningEffort)
+			additionalModelRequestFields = {
+				reasoning: { effort: openAiEffort },
+			}
+			logger.info("Reasoning effort set for Bedrock GPT request", {
+				ctx: "bedrock",
+				modelId: modelConfig.id,
+				effort: openAiEffort,
+			})
 		}
+
+		// Claude 4.7+ (including 4.8) removed sampling parameters entirely — sending
+		// temperature causes a 400 error. The GPT-5.6/6 family also rejects
+		// temperature (supportsTemperature: false in the catalog) - omit the key
+		// entirely for both rather than relying on a `??` fallback, which would
+		// otherwise reintroduce a value from this.options.modelTemperature even when
+		// modelConfig.temperature was correctly left undefined upstream.
+		const omitTemperature = isAdaptiveThinkingModel || modelConfig.info.supportsTemperature === false
 
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-			// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
-			// sending temperature causes a 400 error.
-			...(isAdaptiveThinkingModel
+			...(omitTemperature
 				? {}
 				: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 		}
@@ -969,12 +1042,16 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
 
+			// Claude 4.7+ (including 4.8) removed sampling parameters entirely — sending
+			// temperature causes a 400 error. The GPT-5.6/6 family also rejects
+			// temperature (supportsTemperature: false in the catalog) - omit the key
+			// entirely for both, guarding the non-stream path the same way createMessage
+			// does so completePrompt also works for these models.
+			const omitTemperature = isAdaptiveThinkingModel || modelConfig.info.supportsTemperature === false
+
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
-				// sending temperature causes a 400 error. Guard the non-stream path the
-				// same way createMessage does so completePrompt also works for these models.
-				...(isAdaptiveThinkingModel
+				...(omitTemperature
 					? {}
 					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 			}
@@ -989,6 +1066,17 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			if (isAdaptiveThinkingModel && isMemberOf(BEDROCK_DISABLEABLE_THINKING_MODEL_IDS, baseModelId)) {
 				additionalModelRequestFields = { thinking: { type: "disabled" } }
 				logger.info("Extended thinking explicitly disabled for Bedrock completePrompt", {
+					ctx: "bedrock",
+					modelId: modelConfig.id,
+				})
+			} else if (isMemberOf(BEDROCK_OPENAI_EFFORT_MODEL_IDS, baseModelId)) {
+				// GPT-6 Sol/Luna default to "medium" effort on AWS's side when no effort
+				// is sent. completePrompt is used for one-shot, latency-sensitive calls,
+				// so explicitly disable reasoning here (mirrors the adaptive-thinking
+				// explicit-disable branch above) rather than paying for unwanted
+				// reasoning tokens on every one-shot prompt.
+				additionalModelRequestFields = { reasoning: { effort: "none" } }
+				logger.info("Reasoning effort explicitly disabled for Bedrock GPT completePrompt", {
 					ctx: "bedrock",
 					modelId: modelConfig.id,
 				})
@@ -1312,6 +1400,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		temperature?: number
 		reasoning?: any
 		reasoningBudget?: number
+		reasoningEffort?: string
 	} {
 		if (this.costModelConfig?.id?.trim().length > 0) {
 			// Get model params for cost model config
@@ -1441,6 +1530,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			temperature?: number
 			reasoning?: any
 			reasoningBudget?: number
+			reasoningEffort?: string
 		}
 	}
 
