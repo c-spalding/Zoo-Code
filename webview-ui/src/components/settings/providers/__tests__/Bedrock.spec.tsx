@@ -1,7 +1,9 @@
 import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { Bedrock } from "../Bedrock"
-import { ProviderSettings } from "@roo-code/types"
+import { ProviderSettings, type BedrockDiscoveredTarget } from "@roo-code/types"
+
+const useBedrockDiscoveryMock = vi.hoisted(() => vi.fn())
 
 // Mock the vscrui Checkbox component
 vi.mock("vscrui", () => ({
@@ -71,18 +73,58 @@ vi.mock("@src/components/ui", () => ({
 	SelectTrigger: ({ children }: any) => <>{children}</>,
 	SelectValue: () => null,
 	StandardTooltip: ({ children }: any) => <div>{children}</div>,
+	Button: ({ children, onClick, disabled, type, ...rest }: any) => (
+		<button type={type} onClick={onClick} disabled={disabled} {...rest}>
+			{children}
+		</button>
+	),
+	SearchableSelect: ({
+		value,
+		onValueChange,
+		options,
+		placeholder,
+		disabled,
+		className,
+		"data-testid": testId,
+	}: any) => (
+		<select
+			data-testid={testId}
+			className={className}
+			value={value ?? ""}
+			disabled={disabled}
+			onChange={(e) => onValueChange && onValueChange(e.target.value)}>
+			<option value="" disabled>
+				{placeholder}
+			</option>
+			{options?.map((option: { value: string; label: string }) => (
+				<option key={option.value} value={option.value}>
+					{option.label}
+				</option>
+			))}
+		</select>
+	),
 }))
 
-// Mock the constants
-vi.mock("../../constants", () => ({
-	AWS_REGIONS: [{ value: "us-east-1", label: "US East (N. Virginia)" }],
+// Mock the Bedrock discovery hook so the component doesn't attempt real query/postMessage wiring.
+vi.mock("@src/components/ui/hooks/useBedrockDiscovery", () => ({
+	useBedrockDiscovery: useBedrockDiscoveryMock,
 }))
+
+const defaultDiscoveryResult = {
+	data: [] as BedrockDiscoveredTarget[],
+	isLoading: false,
+	isError: false,
+	error: null as unknown,
+	refetch: vi.fn(),
+	isFetching: false,
+}
 
 describe("Bedrock Component", () => {
 	const mockSetApiConfigurationField = vi.fn()
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		useBedrockDiscoveryMock.mockReturnValue({ ...defaultDiscoveryResult, refetch: vi.fn() })
 	})
 
 	it("should show text field when VPC endpoint checkbox is checked", () => {
@@ -549,6 +591,148 @@ describe("Bedrock Component", () => {
 				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsUseApiKey", false)
 				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsUseProfile", false)
 			})
+		})
+	})
+
+	describe("Inference Target Discovery", () => {
+		const targets: BedrockDiscoveredTarget[] = [
+			{
+				id: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				label: "Claude 3.5 Sonnet v2",
+				baseModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				targetKind: "foundation-model",
+				contextWindow: 200_000,
+				contextSource: "base",
+			},
+			{
+				id: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-app-profile",
+				label: "my-app-profile",
+				baseModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				targetKind: "application-profile",
+				contextWindow: 200_000,
+				contextSource: "base",
+			},
+		]
+
+		it("renders discovered targets in the searchable select and selects a target", () => {
+			useBedrockDiscoveryMock.mockReturnValue({
+				...defaultDiscoveryResult,
+				data: targets,
+				refetch: vi.fn(),
+			})
+
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsRegion: "us-east-1",
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			const targetSelect = screen.getByTestId("bedrock-target-select") as HTMLSelectElement
+			expect(targetSelect).toBeInTheDocument()
+
+			fireEvent.change(targetSelect, {
+				target: {
+					value: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-app-profile",
+				},
+			})
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
+				"awsBedrockInvokeTarget",
+				"arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-app-profile",
+			)
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsBedrockTargetKind", "application-profile")
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
+				"apiModelId",
+				"anthropic.claude-3-5-sonnet-20241022-v2:0",
+			)
+		})
+
+		it("disables the refresh button when no region is configured", () => {
+			useBedrockDiscoveryMock.mockReturnValue({ ...defaultDiscoveryResult, refetch: vi.fn() })
+
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.getByText("settings:providers.bedrock.refreshDiscovery").closest("button")).toBeDisabled()
+			expect(screen.getByTestId("bedrock-target-select")).toBeDisabled()
+		})
+
+		it("calls refetch when the refresh discovery button is clicked", () => {
+			const refetch = vi.fn()
+			useBedrockDiscoveryMock.mockReturnValue({ ...defaultDiscoveryResult, data: targets, refetch })
+
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsRegion: "us-east-1",
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			fireEvent.click(screen.getByText("settings:providers.bedrock.refreshDiscovery"))
+			expect(refetch).toHaveBeenCalledTimes(1)
+		})
+
+		it("shows a discovery error message when the query fails", () => {
+			useBedrockDiscoveryMock.mockReturnValue({
+				...defaultDiscoveryResult,
+				isError: true,
+				error: new Error("Access denied"),
+				refetch: vi.fn(),
+			})
+
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsRegion: "us-east-1",
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.getByText("settings:providers.bedrock.discoveryFailed", { exact: false })).toBeInTheDocument()
+		})
+
+		it("renders the custom ARN fields when the manual ARN target is selected", () => {
+			useBedrockDiscoveryMock.mockReturnValue({ ...defaultDiscoveryResult, data: targets, refetch: vi.fn() })
+
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsRegion: "us-east-1",
+				awsCustomArn: "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/my-provisioned-model",
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.getByTestId("bedrock-target-select")).toHaveValue("__bedrock_manual_arn__")
+			expect(screen.getByText("settings:labels.customArn")).toBeInTheDocument()
 		})
 	})
 })

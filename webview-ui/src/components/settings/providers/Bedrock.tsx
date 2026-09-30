@@ -1,50 +1,234 @@
-import { useCallback, useState, useEffect } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Checkbox } from "vscrui"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
-	type ProviderSettings,
-	type ModelInfo,
+	type BedrockDiscoveredTarget,
 	type BedrockServiceTier,
-	BEDROCK_REGIONS,
-	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	type ModelInfo,
+	type ProviderSettings,
+	BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
+	BEDROCK_REGIONS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
+	bedrockDefaultModelId,
+	bedrockModels,
+	expandBedrockTargetsWith1MVariants,
+	inferBedrockInvokeTargetKind,
+	parseBedrockBaseModelId,
 } from "@roo-code/types"
 
+import { useBedrockDiscovery } from "@src/components/ui/hooks/useBedrockDiscovery"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StandardTooltip } from "@src/components/ui"
+import {
+	Button,
+	SearchableSelect,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+	StandardTooltip,
+} from "@src/components/ui"
 
 import { inputEventTransform, noTransform } from "../transforms"
+import { BedrockCustomArn } from "./BedrockCustomArn"
 
 type BedrockProps = {
 	apiConfiguration: ProviderSettings
-	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
+	setApiConfigurationField: (
+		field: keyof ProviderSettings,
+		value: ProviderSettings[keyof ProviderSettings],
+		isUserAction?: boolean,
+	) => void
 	selectedModelInfo?: ModelInfo
 	simplifySettings?: boolean
 }
+
+const MANUAL_ARN_TARGET = "__bedrock_manual_arn__"
 
 export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedModelInfo }: BedrockProps) => {
 	const { t } = useAppTranslation()
 	const [awsEndpointSelected, setAwsEndpointSelected] = useState(!!apiConfiguration?.awsBedrockEndpointEnabled)
 
-	// Check if the selected model supports 1M context (supported Claude 4 models)
-	const supports1MContextBeta =
-		!!apiConfiguration?.apiModelId && BEDROCK_1M_CONTEXT_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
+	const renderTargetLabel = useCallback(
+		(target: BedrockDiscoveredTarget) => {
+			const kindLabel =
+				target.targetKind === "foundation-model"
+					? t("settings:providers.bedrock.directModel")
+					: target.targetKind === "system-profile"
+						? t("settings:providers.bedrock.systemProfile")
+						: t("settings:providers.bedrock.applicationProfile")
+			const contextLabel =
+				target.contextWindow >= 1_000_000 ? "1M" : `${Math.round(target.contextWindow / 1000)}K`
+			return `${target.label} [${kindLabel}, ${contextLabel}]`
+		},
+		[t],
+	)
 
-	// Check if the selected model supports Global Inference profile routing
+	const {
+		data: discoveredTargets = [],
+		isLoading,
+		isError,
+		error,
+		refetch,
+		isFetching,
+	} = useBedrockDiscovery(apiConfiguration, !!apiConfiguration.awsRegion)
+
+	const selectedBaseModelId = useMemo(() => {
+		if (apiConfiguration.apiModelId) {
+			return parseBedrockBaseModelId(apiConfiguration.apiModelId)
+		}
+		if (apiConfiguration.awsBedrockInvokeTarget) {
+			return parseBedrockBaseModelId(apiConfiguration.awsBedrockInvokeTarget)
+		}
+		if (apiConfiguration.awsCustomArn) {
+			return parseBedrockBaseModelId(apiConfiguration.awsCustomArn)
+		}
+		return bedrockDefaultModelId
+	}, [apiConfiguration.apiModelId, apiConfiguration.awsBedrockInvokeTarget, apiConfiguration.awsCustomArn])
+
+	const selectedTargetKind = apiConfiguration.awsCustomArn
+		? "custom-arn"
+		: apiConfiguration.awsBedrockTargetKind ||
+			inferBedrockInvokeTargetKind({
+				targetId: apiConfiguration.awsBedrockInvokeTarget || apiConfiguration.apiModelId,
+			})
+
+	const isExplicitTargetSelection =
+		selectedTargetKind === "system-profile" ||
+		selectedTargetKind === "application-profile" ||
+		selectedTargetKind === "custom-arn" ||
+		selectedTargetKind === "prompt-router"
+
+	const supportsOptIn1MContext =
+		!!selectedBaseModelId &&
+		BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS.includes(
+			selectedBaseModelId as (typeof BEDROCK_1M_CONTEXT_OPT_IN_MODEL_IDS)[number],
+		)
+
 	const supportsGlobalInference =
-		!!apiConfiguration?.apiModelId &&
-		BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
+		!!selectedBaseModelId &&
+		BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(
+			selectedBaseModelId as (typeof BEDROCK_GLOBAL_INFERENCE_MODEL_IDS)[number],
+		)
 
-	// Check if the selected model supports service tiers
 	const supportsServiceTiers =
-		!!apiConfiguration?.apiModelId && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(apiConfiguration.apiModelId as any)
+		!!selectedBaseModelId &&
+		BEDROCK_SERVICE_TIER_MODEL_IDS.includes(selectedBaseModelId as (typeof BEDROCK_SERVICE_TIER_MODEL_IDS)[number])
 
-	// Update the endpoint enabled state when the configuration changes
+	const fallbackTargets = useMemo<BedrockDiscoveredTarget[]>(
+		() =>
+			expandBedrockTargetsWith1MVariants(
+				Object.entries(bedrockModels).map(([modelId, modelInfo]) => {
+					const typedModelInfo = modelInfo as ModelInfo
+					return {
+						id: modelId,
+						label: typedModelInfo.description ? `${modelId} - ${typedModelInfo.description}` : modelId,
+						baseModelId: modelId,
+						targetKind: "foundation-model" as const,
+						contextWindow: typedModelInfo.contextWindow,
+						contextSource: "base" as const,
+						description: typedModelInfo.description,
+						supportsImages: typedModelInfo.supportsImages,
+						supportsPromptCache: typedModelInfo.supportsPromptCache,
+					}
+				}),
+			),
+		[],
+	)
+
+	// Both `discoverBedrockTargets` (extension side) and `fallbackTargets` (above)
+	// already run their inputs through `expandBedrockTargetsWith1MVariants`, so any
+	// 1M-capable model is paired with its `:1m` synthetic twin before it reaches us.
+	// Re-running the helper here would re-expand every base entry a SECOND time and
+	// produce duplicate `:1m` rows in the dropdown, so we just pick the right list.
+	const availableTargets = useMemo(
+		() => (discoveredTargets.length > 0 ? discoveredTargets : fallbackTargets),
+		[discoveredTargets, fallbackTargets],
+	)
+
+	const selectedTargetValue =
+		apiConfiguration.awsCustomArn || selectedTargetKind === "custom-arn"
+			? MANUAL_ARN_TARGET
+			: apiConfiguration.awsBedrockInvokeTarget || apiConfiguration.apiModelId || bedrockDefaultModelId
+
+	const targetOptions = useMemo(() => {
+		const options = availableTargets.map((target) => ({
+			value: target.id,
+			label: renderTargetLabel(target),
+		}))
+
+		if (
+			selectedTargetValue &&
+			selectedTargetValue !== MANUAL_ARN_TARGET &&
+			!options.some((option) => option.value === selectedTargetValue)
+		) {
+			options.unshift({
+				value: selectedTargetValue,
+				label: t("settings:providers.bedrock.currentTargetSuffix", { value: selectedTargetValue }),
+			})
+		}
+
+		options.push({
+			value: MANUAL_ARN_TARGET,
+			label: t("settings:labels.useCustomArn"),
+		})
+
+		return options
+	}, [availableTargets, selectedTargetValue, renderTargetLabel, t])
+
 	useEffect(() => {
 		setAwsEndpointSelected(!!apiConfiguration?.awsBedrockEndpointEnabled)
 	}, [apiConfiguration?.awsBedrockEndpointEnabled])
+
+	useEffect(() => {
+		if (apiConfiguration.awsCustomArn) {
+			const baseModelId = parseBedrockBaseModelId(apiConfiguration.awsCustomArn)
+
+			if (apiConfiguration.awsBedrockInvokeTarget !== apiConfiguration.awsCustomArn) {
+				setApiConfigurationField("awsBedrockInvokeTarget", apiConfiguration.awsCustomArn, false)
+			}
+			if (apiConfiguration.awsBedrockTargetKind !== "custom-arn") {
+				setApiConfigurationField("awsBedrockTargetKind", "custom-arn", false)
+			}
+			if (baseModelId && apiConfiguration.apiModelId !== baseModelId) {
+				setApiConfigurationField("apiModelId", baseModelId, false)
+			}
+			return
+		}
+
+		if (apiConfiguration.awsBedrockTargetKind === "custom-arn") {
+			if (apiConfiguration.awsBedrockInvokeTarget) {
+				setApiConfigurationField("awsBedrockInvokeTarget", "", false)
+			}
+			return
+		}
+
+		const legacyTarget = apiConfiguration.awsBedrockInvokeTarget || apiConfiguration.apiModelId
+		if (!legacyTarget) {
+			return
+		}
+
+		const inferredKind = inferBedrockInvokeTargetKind({ targetId: legacyTarget })
+		const baseModelId = parseBedrockBaseModelId(legacyTarget)
+
+		if (apiConfiguration.awsBedrockInvokeTarget !== legacyTarget) {
+			setApiConfigurationField("awsBedrockInvokeTarget", legacyTarget, false)
+		}
+		if (apiConfiguration.awsBedrockTargetKind !== inferredKind) {
+			setApiConfigurationField("awsBedrockTargetKind", inferredKind, false)
+		}
+		if (baseModelId && apiConfiguration.apiModelId !== baseModelId) {
+			setApiConfigurationField("apiModelId", baseModelId, false)
+		}
+	}, [
+		apiConfiguration.apiModelId,
+		apiConfiguration.awsBedrockInvokeTarget,
+		apiConfiguration.awsBedrockTargetKind,
+		apiConfiguration.awsCustomArn,
+		setApiConfigurationField,
+	])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -55,6 +239,27 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				setApiConfigurationField(field, transform(event as E))
 			},
 		[setApiConfigurationField],
+	)
+
+	const handleTargetChange = useCallback(
+		(value: string) => {
+			if (value === MANUAL_ARN_TARGET) {
+				setApiConfigurationField("awsBedrockTargetKind", "custom-arn")
+				setApiConfigurationField("awsBedrockInvokeTarget", apiConfiguration.awsCustomArn || "", false)
+				return
+			}
+
+			const selectedTarget = availableTargets.find((target) => target.id === value)
+			if (!selectedTarget) {
+				return
+			}
+
+			setApiConfigurationField("awsCustomArn", "")
+			setApiConfigurationField("awsBedrockInvokeTarget", selectedTarget.id)
+			setApiConfigurationField("awsBedrockTargetKind", selectedTarget.targetKind)
+			setApiConfigurationField("apiModelId", selectedTarget.baseModelId)
+		},
+		[apiConfiguration.awsCustomArn, availableTargets, setApiConfigurationField],
 	)
 
 	return (
@@ -156,6 +361,55 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					</SelectContent>
 				</Select>
 			</div>
+			<div>
+				<div className="flex items-center justify-between gap-3 mb-1">
+					<label className="block font-medium">{t("settings:providers.bedrock.inferenceTarget")}</label>
+					<Button
+						variant="outline"
+						size="sm"
+						type="button"
+						onClick={() => refetch()}
+						disabled={!apiConfiguration.awsRegion || isFetching}>
+						{isFetching
+							? t("settings:providers.bedrock.refreshingDiscovery")
+							: t("settings:providers.bedrock.refreshDiscovery")}
+					</Button>
+				</div>
+				<SearchableSelect
+					value={selectedTargetValue}
+					onValueChange={handleTargetChange}
+					options={targetOptions}
+					placeholder={t("settings:providers.bedrock.choosePlaceholder")}
+					searchPlaceholder={t("settings:providers.bedrock.searchPlaceholder")}
+					emptyMessage={t("settings:providers.bedrock.emptyMessage")}
+					className="w-full"
+					data-testid="bedrock-target-select"
+					disabled={!apiConfiguration.awsRegion}
+				/>
+				<div className="text-sm text-vscode-descriptionForeground mt-1">
+					{apiConfiguration.awsRegion
+						? t("settings:providers.bedrock.discoveryDescription")
+						: t("settings:providers.bedrock.discoveryDescriptionNoRegion")}
+				</div>
+				{isLoading && (
+					<div className="text-sm text-vscode-descriptionForeground mt-1">
+						{t("settings:providers.bedrock.discoveringTargets")}
+					</div>
+				)}
+				{isError && (
+					<div className="text-sm text-vscode-errorForeground mt-1">
+						{t("settings:providers.bedrock.discoveryFailed", {
+							message: error instanceof Error ? error.message : String(error),
+						})}
+					</div>
+				)}
+			</div>
+			{selectedTargetValue === MANUAL_ARN_TARGET && (
+				<BedrockCustomArn
+					apiConfiguration={apiConfiguration}
+					setApiConfigurationField={setApiConfigurationField}
+				/>
+			)}
 			{supportsServiceTiers && (
 				<div>
 					<label className="block font-medium mb-1">{t("settings:providers.awsServiceTier")}</label>
@@ -182,9 +436,9 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				<Checkbox
 					checked={apiConfiguration?.awsUseGlobalInference || false}
 					onChange={(checked: boolean) => {
-						// Global Inference takes priority over cross-region when both are enabled
 						setApiConfigurationField("awsUseGlobalInference", checked)
-					}}>
+					}}
+					disabled={isExplicitTargetSelection}>
 					{t("settings:providers.awsGlobalInference")}
 				</Checkbox>
 			)}
@@ -192,9 +446,15 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				checked={apiConfiguration?.awsUseCrossRegionInference || false}
 				onChange={(checked: boolean) => {
 					setApiConfigurationField("awsUseCrossRegionInference", checked)
-				}}>
+				}}
+				disabled={isExplicitTargetSelection}>
 				{t("settings:providers.awsCrossRegion")}
 			</Checkbox>
+			{isExplicitTargetSelection && (
+				<div className="text-sm text-vscode-descriptionForeground -mt-2">
+					{t("settings:providers.bedrock.explicitTargetNote")}
+				</div>
+			)}
 			{selectedModelInfo?.supportsPromptCache && (
 				<>
 					<Checkbox
@@ -215,7 +475,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					</div>
 				</>
 			)}
-			{supports1MContextBeta && (
+			{supportsOptIn1MContext && (
 				<div>
 					<Checkbox
 						checked={apiConfiguration?.awsBedrock1MContext ?? false}

@@ -227,6 +227,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.vscodeLm,
 	providerIdentifiers.moonshot, // Moonshot has custom ModelPicker inside Moonshot.tsx
+	providerIdentifiers.bedrock, // Bedrock has a custom searchable target picker backed by live discovery
 ]
 
 /**

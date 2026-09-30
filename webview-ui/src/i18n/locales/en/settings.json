@@ -640,6 +640,23 @@
 		"awsServiceTierPriority": "Priority (75% premium)",
 		"awsServiceTierPriorityDesc": "Fastest performance for mission-critical applications",
 		"awsServiceTierNote": "Service tiers affect pricing and performance. Flex offers 50% discount with higher latency, Priority offers 25% better performance with 75% premium.",
+		"bedrock": {
+			"inferenceTarget": "Inference Target",
+			"refreshDiscovery": "Refresh discovery",
+			"refreshingDiscovery": "Refreshing...",
+			"discoveringTargets": "Discovering Bedrock targets...",
+			"discoveryFailed": "Bedrock discovery failed: {{message}}",
+			"choosePlaceholder": "Choose a Bedrock model or profile",
+			"searchPlaceholder": "Search models and profiles",
+			"emptyMessage": "No Bedrock targets found",
+			"discoveryDescription": "Targets are discovered live from your AWS account and region.",
+			"discoveryDescriptionNoRegion": "Select an AWS Region to discover available models and inference profiles.",
+			"explicitTargetNote": "The selected target is already an explicit Bedrock profile/ARN, so additional global or cross-region routing settings are ignored.",
+			"currentTargetSuffix": "{{value}} [Current target]",
+			"directModel": "Direct model",
+			"systemProfile": "System profile",
+			"applicationProfile": "Application profile"
+		},
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Use custom VPC endpoint",
 			"vpcEndpointUrlPlaceholder": "Enter VPC Endpoint URL (optional)",
