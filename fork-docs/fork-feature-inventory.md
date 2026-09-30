@@ -985,17 +985,21 @@ re-baseline project itself, not because of any technical dependency.
 
 ---
 
-## 13. T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A
+## 13. T11 -- New Bedrock models (GPT-5.6/6, Kimi K3)
 
-**Order:** 11th (branch `fork/11-new-bedrock-models`, cut from `feature/zoo-base` after
-the 2026-09-21 resync). Not part of the original 10-tranche code review; added later as
-AWS Bedrock published three new model families.
+**Order:** 11th (branch `fork/11-new-bedrock-models` for phase A, `fork/11b-bedrock-
+reasoning-payload` for phase B, both cut from `feature/zoo-base` after the 2026-09-21
+resync). Not part of the original 10-tranche code review; added later as AWS Bedrock
+published three new model families.
 
-**Status: phase A implemented on `fork/11-new-bedrock-models`, not yet merged.** Commits
-(oldest to newest): `205371f84` (catalog entries + mandatory-profile id list),
-`b78a87f5f` (mandatory inference-profile handler logic), `5c6e94afb` (unit tests),
-`8c740ffcd` (reasoning-effort probe script). **Phase B (reasoning-effort payload wiring)
-is deliberately deferred** -- see "Phase B: gated on probe results" below.
+**Status: phase A and phase B both implemented, not yet merged.** Phase A commits
+(oldest to newest, on `fork/11-new-bedrock-models`): `205371f84` (catalog entries +
+mandatory-profile id list), `b78a87f5f` (mandatory inference-profile handler logic),
+`5c6e94afb` (unit tests), `8c740ffcd` (reasoning-effort probe script). Phase B
+(reasoning-effort payload wiring + temperature-omission fix, on
+`fork/11b-bedrock-reasoning-payload`) is described in full below -- the probe was run
+against real AWS credentials, the payload shape is confirmed, and the code is
+implemented and tested.
 
 ### Purpose
 
@@ -1019,15 +1023,17 @@ when neither of those has already produced a prefix.
 
 ### Principal files
 
-| File                                                                                                                 | New/Modified                                                                                                                 | Status       |
-| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                 | Modified -- 7 catalog entries, `BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS` updated | Phase A done |
-| [`src/api/providers/bedrock.ts`](src/api/providers/bedrock.ts)                                                       | Modified -- mandatory-profile fallback branch in `getModel()`                                                                | Phase A done |
-| [`packages/types/src/__tests__/bedrock-t11-models.test.ts`](packages/types/src/__tests__/bedrock-t11-models.test.ts) | New -- catalog registry-invariant and exact-value tests                                                                      | Phase A done |
-| [`src/api/providers/__tests__/bedrock.spec.ts`](src/api/providers/__tests__/bedrock.spec.ts)                         | Modified -- mandatory-profile handler-logic tests                                                                            | Phase A done |
-| [`scripts/probe-bedrock-reasoning.mjs`](scripts/probe-bedrock-reasoning.mjs)                                         | New -- manual diagnostic script, not part of CI                                                                              | Phase A done |
+| File                                                                                                                 | New/Modified                                                                                                                                                                 | Status                               |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                 | Modified -- 7 catalog entries, `BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS`, `BEDROCK_OPENAI_EFFORT_MODEL_IDS`                      | Phase A + B done                     |
+| [`src/api/providers/bedrock.ts`](src/api/providers/bedrock.ts)                                                       | Modified -- mandatory-profile fallback branch in `getModel()`; nested `reasoning.effort` payload branch and temperature-omission fix in `createMessage()`/`completePrompt()` | Phase A + B done                     |
+| [`packages/types/src/__tests__/bedrock-t11-models.test.ts`](packages/types/src/__tests__/bedrock-t11-models.test.ts) | New -- catalog registry-invariant and exact-value tests                                                                                                                      | Phase A done                         |
+| [`src/api/providers/__tests__/bedrock.spec.ts`](src/api/providers/__tests__/bedrock.spec.ts)                         | Modified -- mandatory-profile handler-logic tests (phase A) + nested reasoning-effort payload / temperature-omission tests (phase B)                                         | Phase A + B done                     |
+| [`scripts/probe-bedrock-reasoning.mjs`](scripts/probe-bedrock-reasoning.mjs)                                         | New -- manual diagnostic script, not part of CI; run against real AWS credentials to confirm the phase B payload shape                                                       | Phase A done, used to inform phase B |
 
-### Source commits on `fork/11-new-bedrock-models`
+### Source commits
+
+Phase A, on `fork/11-new-bedrock-models`:
 
 | Commit      | Subject                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------- |
@@ -1035,6 +1041,15 @@ when neither of those has already produced a prefix.
 | `b78a87f5f` | `feat(bedrock): apply mandatory inference-profile prefix for GPT-5.6/6 and Kimi K3`         |
 | `5c6e94afb` | `test(bedrock): cover mandatory inference-profile logic and T11 catalog sanity`             |
 | `8c740ffcd` | `feat(bedrock): add scripts/probe-bedrock-reasoning.mjs for reasoning-effort payload probe` |
+
+Phase B, on `fork/11b-bedrock-reasoning-payload` (cut from `feature/zoo-base` after phase
+A merged):
+
+| Commit (placeholder until committed) | Subject                                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| TBD                                  | `feat(bedrock): confirm and document nested reasoning.effort payload shape for GPT-6 Sol/Luna`                          |
+| TBD                                  | `feat(bedrock): send nested reasoning.effort payload for GPT-6 Sol/Luna; fix temperature omission for GPT-5.6/6 family` |
+| TBD                                  | `test(bedrock): cover nested reasoning.effort payload and temperature-omission fix`                                     |
 
 ### Upstream status per recon (drop/keep/adapt)
 
@@ -1062,87 +1077,111 @@ comment; the two categories of caveat that recur across all seven entries:
   `supportsReasoningEffort` wherever AWS does not explicitly document it**, rather than
   guessing.
 
-### Phase B: gated on probe results (not yet started)
+### Phase B: probe results and payload implementation (done)
 
-Phase A is catalog metadata and mandatory-profile routing only. **Actually sending a
-reasoning-effort value on the Converse API is phase B, and is deliberately not
-implemented yet**, because AWS's Converse documentation does not specify the payload
-shape for `additionalModelRequestFields` on these models -- it could be a flat
-`reasoning_effort: "..."` field, a nested `reasoning: { effort: "..." }` object, or
-something else entirely; sending the wrong shape risks a 400 error for every user of
-these models. `scripts/probe-bedrock-reasoning.mjs` was built to answer this
-empirically before writing any phase B payload code. It has **not yet been run against
-real AWS credentials** -- this was built and dry-run-verified in a sandbox with no AWS
-credentials configured.
+Phase A was catalog metadata and mandatory-profile routing only, with the
+reasoning-effort payload deliberately deferred pending an empirical probe (AWS's
+Converse documentation does not specify the `additionalModelRequestFields` shape for
+these models). **The probe was run against real AWS credentials (2026-09-30, `bedrock`
+AWS CLI profile, `us-east-1`) via `node scripts/probe-bedrock-reasoning.mjs --model
+openai.gpt-6-sol --region us-east-1 --yes`.**
 
-**To unblock phase B, run the probe** (PowerShell, from the repo root, with AWS
-credentials configured via any of the SDK's standard mechanisms -- `AWS_PROFILE`,
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, or an SSO session):
+**Confirmed result:** the nested shape is accepted; the flat shape is rejected.
 
-```powershell
-# GPT-6 Sol -- has an AWS-documented effort allow-list; resolves Q1 (payload shape) and Q2 (whether the shape works at all)
-node scripts/probe-bedrock-reasoning.mjs --model openai.gpt-6-sol --region us-east-1 --yes
+- `c-nested-effort` (`additionalModelRequestFields: { reasoning: { effort: "high" } }`)
+  -- **succeeded**.
+- `b-flat-effort` (`additionalModelRequestFields: { reasoning_effort: "high" }`) --
+  **failed** with `ValidationException: Unknown parameter: 'reasoning_effort'`.
+- This resolves this tranche's Q1 (payload shape) and Q2 (whether the shape works at
+  all) definitively for GPT-6 Sol; GPT-6 Luna is assumed to share the same contract
+  (same model family, same AWS-documented effort allow-list) and was not re-probed
+  separately.
+- Kimi K3 was not probed in this pass (no `preserveReasoning`/multi-turn-echo change was
+  in scope for this work item); the K3 `e-k3-multiturn` question from phase A remains
+  open and is not blocking, since K3 has no reasoning-effort control to wire regardless.
 
-# Kimi K3 -- also runs the multi-turn reasoning-echo test (e-k3-multiturn) to check for
-# the documented InternalServerException risk when reasoning content is echoed back
-node scripts/probe-bedrock-reasoning.mjs --model moonshotai.kimi-k3 --region us-east-1 --yes
-```
+**What was implemented as a result:**
 
-Each invocation places at most 6 small Converse calls (`max_tokens` ~200 each); AWS's
-own list pricing puts the total cost for both commands combined at well under US$0.05.
-Omit `--yes` first to see the dry-run plan (model id with profile prefix, tests that
-will run, and the cost estimate) with no AWS calls made. Run `node
-scripts/probe-bedrock-reasoning.mjs --help` for the full flag list (`--region`,
-`--profile-prefix`, `--effort`, `--max-tokens`, `--stream`, `--skip-k3-multiturn`).
+1. **Nested `reasoning.effort` payload for GPT-6 Sol/Luna.** New
+   `BEDROCK_OPENAI_EFFORT_MODEL_IDS = ["openai.gpt-6-sol", "openai.gpt-6-luna"]` constant
+   in `packages/types/src/providers/bedrock.ts` (scoped to exactly the two ids with an
+   AWS-documented effort allow-list). In `src/api/providers/bedrock.ts`,
+   `createMessage()` and `completePrompt()` each gained an `else if
+(isMemberOf(BEDROCK_OPENAI_EFFORT_MODEL_IDS, baseModelId))` branch (parallel to the
+   existing Claude `BEDROCK_DISABLEABLE_THINKING_MODEL_IDS` branch) that sets
+   `additionalModelRequestFields = { reasoning: { effort } }`. A new
+   `normalizeReasoningEffortForOpenAiBedrock()` helper resolves the already-computed
+   `modelConfig.reasoningEffort` (from the generic `getModelParams()` /
+   `shouldUseReasoningEffort()` pipeline) into one of
+   `none/low/medium/high/xhigh/max`, defaulting to `"none"` for anything unrecognized.
+   When the user disables reasoning, an **explicit** `effort: "none"` is sent rather
+   than omitting the field, mirroring the existing Claude explicit-disable pattern --
+   this avoids silently falling back to AWS's undocumented `medium` default.
+   `completePrompt()` (used for one-shot, latency-sensitive calls) always sends an
+   explicit `effort: "none"` rather than resolving user settings, to avoid paying for
+   unwanted reasoning tokens on every one-shot prompt.
+2. **Temperature-omission fix for the whole GPT-5.6/6 family.** Root cause: even though
+   the generic `getModelParams()` layer already nulls `temperature` when
+   `model.supportsTemperature === false`, Bedrock's own `inferenceConfig` construction
+   used `modelConfig.temperature ?? (this.options.modelTemperature as number)`, and that
+   `??` fallback reintroduced a value from user settings even when
+   `modelConfig.temperature` was correctly `undefined`. Fixed in both `createMessage()`
+   and `completePrompt()` by introducing `const omitTemperature =
+isAdaptiveThinkingModel || modelConfig.info.supportsTemperature === false` and
+   conditionally spreading the `temperature` key into `inferenceConfig` entirely (rather
+   than relying on a nullable fallback), extending the existing Claude-only omission
+   pattern to cover all six GPT-5.6/6 catalog entries (previously only Claude adaptive-
+   thinking models were covered, even though the catalog already declared
+   `supportsTemperature: false` for the GPT-5.6/6 family).
 
-**What each probe outcome decides for phase B:**
-
-- If `b-flat-effort` succeeds and `c-nested-effort` fails (or vice versa): phase B sends
-  exactly that shape and drops the other.
-- If both `b-flat-effort` and `c-nested-effort` fail with a 400/validation error: neither
-  shape is accepted on Converse for these models; phase B either finds a third shape
-  from the error text or documents that reasoning-effort control is unavailable via
-  Converse for these models (matching AWS's own recommendation, noted in the K3 catalog
-  entry's description, to prefer the OpenAI-compatible API over Converse for K3).
-- `d-illegal-effort`'s error text (if any test succeeds at all) is read to confirm the
-  exact enum AWS validates against, in case it differs from what the model card states.
-- For K3 specifically: if `e-k3-multiturn`'s turn 2 throws `InternalServerException`,
-  that confirms the catalog's existing decision to omit `preserveReasoning` on the K3
-  entry (already implemented in phase A) is correct and should stay; if it succeeds, it
-  means the K3 model card's warning is either historical or region/version-specific, and
-  the extension might safely revisit adding `preserveReasoning` in phase B.
+**Tests added** (`src/api/providers/__tests__/bedrock.spec.ts`, new `describe("GPT-6
+Sol/Luna reasoning effort (nested Converse shape)")` block, 7 tests): nested payload
+shape sent for GPT-6 Sol/Luna with an explicit effort; default `medium` effort when no
+explicit setting is provided; explicit `effort: "none"` sent (not omitted) when
+reasoning is disabled; GPT-5.6 Sol does **not** get the `reasoning.effort` branch (no
+allow-list) but still gets temperature omitted; `completePrompt` sends explicit
+`effort: "none"` for GPT-6 Luna; `completePrompt` omits temperature for GPT-5.6 Terra
+even without the effort branch. All 210 tests across the six Bedrock spec files
+(`bedrock.spec.ts`, `bedrock-custom-arn.spec.ts`, `bedrock-error-handling.spec.ts`,
+`bedrock-inference-profiles.spec.ts`, `bedrock-native-tools.spec.ts`,
+`bedrock-reasoning.spec.ts`) and all 18 catalog-invariant tests
+(`packages/types/src/__tests__/bedrock-t11-models.test.ts`) pass. `check-types` is
+clean in both `packages/types` and `src`.
 
 ### Known defects to fix during re-application
 
-None yet identified -- this is new content, not a re-application, so there is no
-existing defect list to carry over. Re-check this section once phase B lands.
+None identified. The temperature-omission bug fixed in phase B was introduced in phase
+A of this same tranche (never shipped upstream), not inherited from an earlier
+tranche, so there is nothing to backport elsewhere.
 
 ### Dependencies on other tranches
 
 None. Independent of every other tranche; only depends on the existing cross-region/
 Global-inference prefix infrastructure already present at BASE (`getPrefixForRegion()`,
-`AWS_INFERENCE_PROFILE_MAPPING`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS`), which phase A
-reuses rather than duplicating.
+`AWS_INFERENCE_PROFILE_MAPPING`, `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS`) and the generic
+`getModelParams()`/`shouldUseReasoningEffort()` pipeline in
+`src/api/transform/model-params.ts` / `src/shared/api.ts`, both reused rather than
+duplicated.
 
 ### Before upstream submission checklist
 
-- [ ] Run the probe script against real AWS credentials and record the actual result
-      (payload shape confirmed, or documented as unavailable) before writing any phase B
-      code -- do not upstream phase A alone without at least attempting phase B, since a
-      catalog entry with no working reasoning-effort control for a model that advertises
-      one is a lesser but still incomplete contribution.
-- [ ] Implement and test phase B once probe results are in; update this section's
-      "Phase B" status accordingly.
+- [x] Run the probe script against real AWS credentials and record the actual result --
+      done 2026-09-30, nested shape confirmed, flat shape confirmed rejected.
+- [x] Implement and test phase B once probe results are in.
 - [ ] Open GitHub issue, comment "Claiming", get Discord assignment before opening a PR.
 - [ ] Branch rebased onto `zoo/main`.
 - [ ] i18n: none needed (no new UI strings; reuses the existing effort-dropdown pattern).
 - [ ] `.changeset/` entry, `minor` impact (new models, no breaking change).
-- [ ] Re-verify every "unverified" `maxTokens` value and reasoning-effort omission
-      against AWS's model cards at submission time -- these families are new and AWS's
-      documentation may have been filled in since phase A was written.
-- [ ] Confirm `src/eslint-suppressions.json` suppression counts for
-      `api/providers/bedrock.ts` and `api/providers/__tests__/bedrock.spec.ts` are still
-      at their phase-A baseline (34 and 38 respectively) -- unchanged by this tranche.
+- [ ] Re-verify every "unverified" `maxTokens` value against AWS's model cards at
+      submission time -- these families are new and AWS's documentation may have been
+      filled in since phase A was written.
+- [ ] Consider probing GPT-6 Luna and Kimi K3 (`e-k3-multiturn`) directly rather than
+      relying on the GPT-6 Sol result by family inference, before upstreaming.
+- [x] Confirm `src/eslint-suppressions.json` suppression counts for
+      `api/providers/bedrock.ts` and `api/providers/__tests__/bedrock.spec.ts` are
+      unchanged by this tranche (34 and 38 respectively) -- verified 2026-09-30; one new
+      `any` usage introduced by the new tests was fixed in place (typed the test's local
+      `OpenAiEffortCommandArg` helper type) rather than budgeted.
 
 ---
 
