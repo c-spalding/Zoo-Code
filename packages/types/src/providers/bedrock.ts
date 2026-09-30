@@ -459,6 +459,138 @@ export const bedrockModels = {
 		outputPrice: 6.0,
 		description: "GPT-OSS 120B - Production-ready, general-purpose, high-reasoning model",
 	},
+	// GPT-5.6 / GPT-6 family on Amazon Bedrock (bedrock-runtime, Converse API).
+	// R1 (mandatory inference profile): AWS documents the base model id as NOT
+	// invokable on-demand for any of these - an inference profile (us./global., plus
+	// in. for Terra/Luna in India regions) is required even when the user has not
+	// opted into cross-region inference. See BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS
+	// and the mandatory-profile handling in src/api/providers/bedrock.ts getModel().
+	// supportsPromptCache: false for every GPT entry - AWS marks prompt caching
+	// "(Responses API only)" for this family, so the Converse path this extension
+	// uses does not get it despite the pricing tables listing cache rates.
+	// Reasoning-effort payload shape on Converse is UNVERIFIED (see plans/
+	// new-bedrock-models-research.md Q1/R2) - phase A (this) is catalog + mandatory
+	// profile handling only. Do not add thinking/effort payload logic for these ids
+	// yet; that is phase B, gated on scripts/probe-bedrock-reasoning.mjs results.
+	"openai.gpt-5.6-sol": {
+		// maxTokens unverified - borrowed from upstream non-Bedrock openai.ts
+		// gpt-5.6-sol entry; the AWS model card is silent on max output tokens.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		inputPrice: 4.0, // Global CRIS; in-Region/Geo CRIS is ~10% higher (not modelled)
+		outputPrice: 20.0,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		// No supportsReasoningEffort yet - AWS's GPT-5.6 Sol card has no "reasoning
+		// effort" section (doc gap, not confirmed unsupported - see research Q2).
+		description:
+			"GPT-5.6 Sol on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand.",
+	},
+	"openai.gpt-5.6-terra": {
+		// maxTokens unverified - no upstream non-Bedrock entry exists for Terra to
+		// borrow from; the AWS model card is silent on max output tokens.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		inputPrice: 2.0, // Global CRIS
+		outputPrice: 12.0,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		description:
+			"GPT-5.6 Terra on Amazon Bedrock (Converse). Requires an inference profile (us./global., plus in. in India regions) - the base model id is not invokable on-demand.",
+	},
+	"openai.gpt-5.6-luna": {
+		// maxTokens unverified - no upstream non-Bedrock entry exists for Luna to
+		// borrow from; the AWS model card is silent on max output tokens.
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		inputPrice: 0.2, // Global CRIS
+		outputPrice: 1.2,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		description:
+			"GPT-5.6 Luna on Amazon Bedrock (Converse). Requires an inference profile (us./global., plus in. in India regions) - the base model id is not invokable on-demand.",
+	},
+	"openai.gpt-6-astra": {
+		maxTokens: 128_000, // AWS-documented (model card states "128,000" directly)
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		inputPrice: 10.0, // Global CRIS
+		outputPrice: 50.0,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		// No supportsReasoningEffort yet - AWS's GPT-6 Astra card has no "reasoning
+		// effort" section (doc gap - see research Q2), unlike GPT-6 Sol/Luna below.
+		description:
+			"GPT-6 Astra on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand.",
+	},
+	"openai.gpt-6-sol": {
+		// maxTokens unverified - no upstream non-Bedrock entry exists for GPT-6 Sol
+		// to borrow from; the AWS model card is silent on max output tokens.
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		// AWS-documented directly on this model's card: "Set reasoning effort to
+		// none, low, medium, high, xhigh, or max. The default is medium." Catalog
+		// metadata only in this phase (drives the UI dropdown) - the payload branch
+		// that actually sends reasoning_effort is phase B, gated on the probe script.
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 2.0, // Global CRIS
+		outputPrice: 10.0,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		description:
+			"GPT-6 Sol on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand.",
+	},
+	"openai.gpt-6-luna": {
+		// maxTokens unverified - no upstream non-Bedrock entry exists for GPT-6 Luna
+		// to borrow from; the AWS model card is silent on max output tokens.
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		// AWS-documented directly on this model's card, identical wording to GPT-6 Sol.
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1, // Global CRIS
+		outputPrice: 0.5,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+		},
+		description:
+			"GPT-6 Luna on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand.",
+	},
 	"meta.llama3-3-70b-instruct-v1:0": {
 		maxTokens: 8192,
 		contextWindow: 128_000,
@@ -584,6 +716,36 @@ export const bedrockModels = {
 		outputPrice: 2.5,
 		description: "Kimi K2 Thinking (1T parameter MoE model with 32B active parameters)",
 	},
+	// Kimi K3 on Amazon Bedrock (bedrock-runtime, Converse API). Note the vendor
+	// prefix differs from kimi-k2-thinking above ("moonshotai." vs "moonshot.") -
+	// this is confirmed from AWS's own model card, not a typo; do not "normalise"
+	// the two ids to match.
+	// R1 (mandatory inference profile): AWS documents in-Region invocation as
+	// unsupported for K3 in every listed Region - only us./global. inference
+	// profiles work. See BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS.
+	// Deliberately NOT setting preserveReasoning: AWS's K3 card documents an
+	// InternalServerException when reasoning content from a prior turn is echoed
+	// back in a multi-turn Converse request. preserveReasoning: true on
+	// kimi-k2-thinking above is what re-sends that content, so K3 must omit it.
+	// No supportsReasoningEffort: the K3 card has no "reasoning effort" section
+	// and reasoning is always on; sending an unverified effort field on Converse
+	// risks a 400 (research Q1/section 2b) - omitted until AWS documents a
+	// Converse-specific contract for it.
+	"moonshotai.kimi-k3": {
+		// maxTokens unverified - borrowed from upstream non-Bedrock moonshot.ts
+		// kimi-k3 entry; the AWS model card is silent on max output tokens.
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true, // implicit caching only; no API restriction documented for it
+		inputPrice: 3.0, // Global CRIS
+		outputPrice: 15.0,
+		cacheWritesPrice: 3.75, // 30-min explicit-caching write rate (Responses/Chat Completions only; unused on Converse)
+		cacheReadsPrice: 0.3,
+		minTokensPerCachePoint: 1024,
+		description:
+			"Kimi K3 on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand. AWS recommends the OpenAI-compatible APIs over Converse for this model; Converse multi-turn requests must not echo prior-turn reasoning content back (InternalServerException risk).",
+	},
 	"minimax.minimax-m2": {
 		maxTokens: 16_384,
 		contextWindow: 196_608,
@@ -692,7 +854,13 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // - Claude Opus 4.6
 // - Claude Opus 4.7
 // - Claude Opus 5
-// - Claude Fable 5 and 5.1 (cross-region inference only — can only be used through an inference profile)
+// - Claude Fable 5 and 5.1 (cross-region inference only - can only be used through an inference profile)
+// - GPT-5.6 Sol/Terra/Luna, GPT-6 Astra/Sol/Luna, Kimi K3 (T11: every one of these
+//   also REQUIRES a profile - see BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS
+//   below. Listing them here too means the existing opt-in "Use Global Inference"
+//   toggle produces the expected `global.` id for them without any new logic;
+//   the mandatory-profile fallback only has to cover the case where the user has
+//   opted into neither Global nor cross-region inference.)
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -706,6 +874,13 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-5",
 	"anthropic.claude-fable-5-1",
 	"anthropic.claude-fable-5",
+	"openai.gpt-5.6-sol",
+	"openai.gpt-5.6-terra",
+	"openai.gpt-5.6-luna",
+	"openai.gpt-6-astra",
+	"openai.gpt-6-sol",
+	"openai.gpt-6-luna",
+	"moonshotai.kimi-k3",
 ] as const
 
 // Adaptive-thinking models that accept an explicit `thinking: { type: "disabled" }`
@@ -742,3 +917,34 @@ export const BEDROCK_SERVICE_TIER_PRICING = {
 	FLEX: 0.5, // 50% discount from standard
 	PRIORITY: 1.75, // 75% premium over standard
 } as const
+
+// Models whose base (unprefixed) model id is documented by AWS as NOT invokable
+// on-demand on bedrock-runtime - an inference profile prefix (regional or global)
+// is mandatory, not opt-in, unlike BEDROCK_GLOBAL_INFERENCE_MODEL_IDS above (which
+// only widens what's *available*, never requires it). See T11 research doc risk
+// R1 (plans/new-bedrock-models-research.md) for the AWS model-card citations.
+//
+// Confirmed profile prefixes per AWS's model cards: `us.` and `global.` for every
+// entry below, plus `in.` for GPT-5.6 Terra/Luna specifically in India Regions.
+// No `eu.`/`apac.`/`au.`/`jp.`/`ca.`/`sa.`/`ug.` profile is documented for ANY of
+// these models - AWS's docs only ever show `us.` and `global.` (research section 1).
+//
+// Fallback-prefix decision (explicit, not a guess): when the mandatory-profile
+// handler needs a prefix and the user has not opted into cross-region inference,
+// it reuses AwsBedrockHandler.getPrefixForRegion() - the SAME region-to-prefix
+// table the opt-in cross-region path already uses (au./eu./apac./jp./ca./sa./ug./us.)
+// - rather than inventing a second table. This is a deliberate choice by the
+// project owner to keep one source of truth for region-to-prefix mapping, accepting
+// that prefixes other than us./global. are unverified for these specific models
+// and may 400 until confirmed. Users who hit that can switch to Global Inference
+// (awsUseGlobalInference) or cross-region inference explicitly, both of which
+// still work normally for these ids.
+export const BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS = [
+	"openai.gpt-5.6-sol",
+	"openai.gpt-5.6-terra",
+	"openai.gpt-5.6-luna",
+	"openai.gpt-6-astra",
+	"openai.gpt-6-sol",
+	"openai.gpt-6-luna",
+	"moonshotai.kimi-k3",
+] as const
