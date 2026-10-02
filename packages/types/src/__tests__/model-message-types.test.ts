@@ -6,6 +6,7 @@ import {
 import { OpenAiModelsMessageType, openAiModelsMessageTypeSchema } from "../providers/openai.js"
 import { LmStudioModelsMessageType, lmStudioModelsMessageTypeSchema } from "../providers/lm-studio.js"
 import { VsCodeLmModelsMessageType, vsCodeLmModelsMessageTypeSchema } from "../providers/vscode-llm.js"
+import { BedrockDiscoveryMessageType, bedrockDiscoveryMessageTypeSchema } from "../providers/bedrock.js"
 
 describe("OllamaModelsMessageType", () => {
 	it("exposes the request and response message types", () => {
@@ -36,6 +37,13 @@ describe.each([
 		vsCodeLmModelsMessageTypeSchema,
 		"requestVsCodeLmModels",
 		"vsCodeLmModels",
+	],
+	[
+		"Bedrock discovery",
+		BedrockDiscoveryMessageType,
+		bedrockDiscoveryMessageTypeSchema,
+		"requestBedrockDiscovery",
+		"bedrockDiscovery",
 	],
 ])("%s model message types", (_provider, messageType, schema, requestType, responseType) => {
 	it("exposes and validates its request and response types", () => {

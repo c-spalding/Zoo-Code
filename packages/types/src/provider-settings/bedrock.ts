@@ -31,5 +31,20 @@ export const bedrockProviderDefinition = createProviderDefinition({
 		awsBedrockEndpoint: z.string().optional(),
 		awsBedrock1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
 		awsBedrockServiceTier: z.enum(["STANDARD", "FLEX", "PRIORITY"]).optional(), // AWS Bedrock service tier selection
+		// The invoke target (model ID, inference profile ID, or ARN) explicitly selected from the discovered
+		// targets dropdown. When unset, the target is inferred from apiModelId/awsCustomArn.
+		awsBedrockInvokeTarget: z.string().optional(),
+		// The kind of invoke target selected (foundation model, system/application inference profile, prompt
+		// router, custom ARN, or unknown). Used to reconcile discovery results with legacy static model IDs.
+		awsBedrockTargetKind: z
+			.enum([
+				"foundation-model",
+				"system-profile",
+				"application-profile",
+				"custom-arn",
+				"prompt-router",
+				"unknown",
+			])
+			.optional(),
 	},
 })

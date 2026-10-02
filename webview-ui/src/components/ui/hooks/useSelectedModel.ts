@@ -5,7 +5,6 @@ import {
 	type ModelRecord,
 	type RouterModels,
 	anthropicModels,
-	bedrockModels,
 	deepSeekModels,
 	moonshotModels,
 	minimaxModels,
@@ -32,12 +31,12 @@ import {
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelInfo,
-	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
 	isRetiredProvider,
 	getProviderDefaultModelId,
 	providerIdentifiers,
+	resolveBedrockModelInfo,
 } from "@roo-code/types"
 
 import { useRouterModels } from "./useRouterModels"
@@ -236,28 +235,34 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.bedrock: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const baseInfo = bedrockModels[id as keyof typeof bedrockModels]
-
-			// Special case for custom ARN.
-			if (id === "custom-arn") {
+			// Custom ARN special-case (restores upstream PR #11373 behaviour).
+			// Detect either a real ARN string (awsCustomArn) or the "custom-arn" sentinel
+			// used by apiModelId. This must short-circuit BEFORE resolveBedrockModelInfo()
+			// so the generic unrecognised-id fallback (which borrows a static model's shape)
+			// is left untouched. Custom ARNs default capabilities ON.
+			if (apiConfiguration.awsCustomArn || apiConfiguration.apiModelId === "custom-arn") {
+				const id = apiConfiguration.apiModelId ?? defaultModelId
 				return {
 					id,
 					info: { maxTokens: 5000, contextWindow: 128_000, supportsPromptCache: true, supportsImages: true },
 				}
 			}
 
-			// Apply 1M context for supported Claude 4 models when enabled
-			if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(id as any) && apiConfiguration.awsBedrock1MContext && baseInfo) {
-				// Create a new ModelInfo object with updated context window
-				const info: ModelInfo = {
-					...baseInfo,
-					contextWindow: 1_000_000,
-				}
-				return { id, info }
-			}
+			const targetId =
+				apiConfiguration.awsCustomArn ||
+				apiConfiguration.awsBedrockInvokeTarget ||
+				apiConfiguration.apiModelId ||
+				defaultModelId
 
-			return { id, info: baseInfo }
+			const resolved = resolveBedrockModelInfo({
+				baseModelId: apiConfiguration.apiModelId,
+				targetId,
+				optIn1MContext: apiConfiguration.awsBedrock1MContext,
+				contextWindowOverride: apiConfiguration.awsModelContextWindow,
+			})
+
+			const displayId = apiConfiguration.apiModelId ?? resolved.baseModelId
+			return { id: displayId, info: resolved.info }
 		}
 		case providerIdentifiers.vertex: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

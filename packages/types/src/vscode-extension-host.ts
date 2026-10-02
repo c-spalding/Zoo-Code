@@ -17,6 +17,7 @@ import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
 import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
+import { BedrockDiscoveryMessageType, type BedrockDiscoveredTarget } from "./providers/bedrock.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
@@ -48,6 +49,7 @@ export interface ExtensionMessage {
 		| typeof OllamaModelsMessageType.ollamaModels
 		| typeof LmStudioModelsMessageType.lmStudioModels
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
+		| typeof BedrockDiscoveryMessageType.bedrockDiscovery
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -143,6 +145,7 @@ export interface ExtensionMessage {
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
+	bedrockDiscovery?: BedrockDiscoveredTarget[]
 	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
@@ -492,6 +495,7 @@ export interface WebviewMessage {
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
+		| typeof BedrockDiscoveryMessageType.requestBedrockDiscovery
 		| "requestRooModels"
 		| typeof VsCodeLmModelsMessageType.requestVsCodeLmModels
 		| "openImage"

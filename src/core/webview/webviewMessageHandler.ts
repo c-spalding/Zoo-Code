@@ -29,6 +29,7 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
+	BedrockDiscoveryMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
@@ -91,6 +92,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
+import { discoverBedrockTargets } from "../../api/providers/bedrock-discovery"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1455,6 +1457,35 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				// Silently fail - user hasn't configured LM Studio yet.
 				console.debug("LM Studio models fetch failed:", error)
+			}
+			break
+		}
+		case BedrockDiscoveryMessageType.requestBedrockDiscovery: {
+			const requestId = message.requestId
+			try {
+				const { apiConfiguration } = message
+				if (!apiConfiguration?.awsRegion) {
+					await provider.postMessageToWebview({
+						type: BedrockDiscoveryMessageType.bedrockDiscovery,
+						requestId,
+						bedrockDiscovery: [],
+					})
+					break
+				}
+
+				const bedrockDiscovery = await discoverBedrockTargets(apiConfiguration)
+				await provider.postMessageToWebview({
+					type: BedrockDiscoveryMessageType.bedrockDiscovery,
+					requestId,
+					bedrockDiscovery,
+				})
+			} catch (error) {
+				await provider.postMessageToWebview({
+					type: BedrockDiscoveryMessageType.bedrockDiscovery,
+					requestId,
+					bedrockDiscovery: [],
+					error: error instanceof Error ? error.message : String(error),
+				})
 			}
 			break
 		}
