@@ -1403,10 +1403,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			optIn1MContext: this.options.awsBedrock1MContext,
 			modelMaxTokens: this.options.modelMaxTokens,
 			contextWindowOverride: this.options.awsModelContextWindow,
-			// NOTE: `awsModelMaxOutputTokens` (an empirically-probed static max-output-tokens
-			// override) is a T6 (fork/06-bedrock-max-output-tokens) field that does not exist
-			// in the provider-settings schema yet, so `maxOutputTokensOverride` is deliberately
-			// omitted here. Wire it through once T6 lands.
+			// T6: empirically-probed (or manually entered) static max-output-tokens cap.
+			// Widens `info.maxTokens` above the static catalog value when set; the
+			// request-time `modelMaxTokens` slider (above) still wins over this if set.
+			maxOutputTokensOverride: this.options.awsModelMaxOutputTokens,
 		})
 
 		if (resolved.baseModelId in bedrockModels) {

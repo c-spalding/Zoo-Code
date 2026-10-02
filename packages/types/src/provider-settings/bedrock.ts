@@ -27,6 +27,12 @@ export const bedrockProviderDefinition = createProviderDefinition({
 		awsUseApiKey: z.boolean().optional(),
 		awsCustomArn: z.string().optional(),
 		awsModelContextWindow: z.number().optional(),
+		// T6: Empirically detected (or manually entered) per-config cap on the model's max
+		// output tokens. Takes precedence over the static `bedrockModels.<id>.maxTokens` table
+		// when present (see `resolveBedrockModelInfo`'s `maxOutputTokensOverride` parameter).
+		// Populated by the "Detect max output tokens" probe button (see
+		// `probeBedrockMaxOutputTokens` in src/api/providers/bedrock-discovery.ts) or manually.
+		awsModelMaxOutputTokens: z.number().optional(),
 		awsBedrockEndpointEnabled: z.boolean().optional(),
 		awsBedrockEndpoint: z.string().optional(),
 		awsBedrock1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.

@@ -15,6 +15,30 @@ export const BedrockDiscoveryMessageType = bedrockDiscoveryMessageTypeSchema.enu
 
 export type BedrockDiscoveryMessageType = z.infer<typeof bedrockDiscoveryMessageTypeSchema>
 
+// T6: Bedrock empirical max-output-tokens probe - request/response message types exchanged
+// between the extension host and the webview (see probeBedrockMaxOutputTokens in
+// src/api/providers/bedrock-discovery.ts and useBedrockMaxTokensProbe in the webview).
+export const bedrockMaxTokensProbeMessageTypes = ["requestBedrockMaxTokensProbe", "bedrockMaxTokensProbe"] as const
+
+export const bedrockMaxTokensProbeMessageTypeSchema = z.enum(bedrockMaxTokensProbeMessageTypes)
+
+export const BedrockMaxTokensProbeMessageType = bedrockMaxTokensProbeMessageTypeSchema.enum
+
+export type BedrockMaxTokensProbeMessageType = z.infer<typeof bedrockMaxTokensProbeMessageTypeSchema>
+
+/**
+ * Result payload for the T6 empirical max-output-tokens probe. Shared between the
+ * extension host (`probeBedrockMaxOutputTokens` in src/api/providers/bedrock-discovery.ts,
+ * which produces it) and the webview (`useBedrockMaxTokensProbe`, which consumes it via the
+ * `bedrockMaxTokensProbe` extension message) -- defined here rather than in `src/` so both
+ * sides can share one type without `packages/types` depending on `src/`.
+ */
+export interface BedrockMaxOutputProbeResult {
+	maxOutputTokens: number
+	source: "accepted" | "hint" | "binary-search"
+	attempts: number
+}
+
 export type BedrockModelId = keyof typeof bedrockModels
 
 export const bedrockDefaultModelId: BedrockModelId = "anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -1409,11 +1433,10 @@ export const resolveBedrockModelInfo = ({
 	// Request-time "how many tokens to ask for" knob (slider value). Mirrors historic behaviour.
 	modelMaxTokens?: number
 	contextWindowOverride?: number
-	// Static cap override (e.g. an empirically-detected max-output-tokens value). When set,
-	// this widens the effective `info.maxTokens` ceiling that downstream UI and request
-	// builders see, even if the user has not explicitly bumped the slider. Not currently wired
-	// to any provider-setting field (that lands in a later tranche); the parameter exists so
-	// this resolver's contract doesn't need to change when it is.
+	// Static cap override (e.g. an empirically-detected max-output-tokens value, see
+	// `awsModelMaxOutputTokens`). When set, this widens the effective `info.maxTokens`
+	// ceiling that downstream UI and request builders see, even if the user has not
+	// explicitly bumped the slider.
 	maxOutputTokensOverride?: number
 }): { baseModelId: string; info: ModelInfo; uses1MContext: boolean; contextSource: BedrockContextSource } => {
 	const resolvedBaseModelId = parseBedrockBaseModelId(baseModelId || targetId || bedrockDefaultModelId)
