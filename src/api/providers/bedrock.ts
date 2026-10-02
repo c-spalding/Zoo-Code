@@ -10,6 +10,7 @@ import {
 	ToolConfiguration,
 	ToolChoice,
 } from "@aws-sdk/client-bedrock-runtime"
+import { BedrockClient, ListInferenceProfilesCommand, type BedrockClientConfig } from "@aws-sdk/client-bedrock"
 import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
@@ -26,8 +27,6 @@ import {
 	bedrockModels,
 	bedrockDefaultPromptRouterModelId,
 	BEDROCK_DEFAULT_TEMPERATURE,
-	BEDROCK_MAX_TOKENS,
-	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
@@ -38,6 +37,10 @@ import {
 	BEDROCK_SERVICE_TIER_PRICING,
 	SERVICE_TIER_KEY,
 	ApiProviderError,
+	inferBedrockInvokeTargetKind,
+	parseBedrockBaseModelId,
+	resolveBedrockModelInfo,
+	stripBedrock1MContextSuffix,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -332,6 +335,24 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	private arnInfo: any
 	private readonly providerName = "Bedrock"
 
+	// Cross-region inference profile id allowlist, populated lazily via a single
+	// `ListInferenceProfilesCommand` call against the user's region. AWS only routes
+	// requests when a regional system inference profile (e.g. `us.moonshotai.kimi-k2.5`)
+	// has been published; brand-new foundation models often launch on-demand BEFORE the
+	// matching regional profile exists. Without this gate we'd unconditionally prepend
+	// the regional prefix and Bedrock would reject the call as
+	// "the provided model identifier is invalid".
+	//
+	// Lifecycle:
+	//   undefined -> lookup is pending or was never started; preserve legacy behavior
+	//                (apply the prefix as before) so we don't regress users today.
+	//   null      -> lookup failed (e.g. missing `bedrock:ListInferenceProfiles` IAM
+	//                permission, network error). Same fallback as `undefined`.
+	//   Set       -> AWS-confirmed regional profile ids; only apply the prefix when
+	//                the candidate id is in this set.
+	private crossRegionProfileIdsResolved: Set<string> | null | undefined = undefined
+	private crossRegionProfileIdsPromise?: Promise<Set<string> | null>
+
 	constructor(options: ProviderSettings) {
 		super()
 		this.options = options
@@ -433,6 +454,95 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		this.client = new BedrockRuntimeClient(clientConfig)
+
+		// Kick off (but don't await) discovery of which cross-region inference profile
+		// ids AWS has actually published in this region. The result gates the prefix
+		// in `getModel()` so brand-new foundation models that don't yet have a regional
+		// system profile (e.g. moonshotai.kimi-k2.5 in 2026) aren't rejected by Bedrock
+		// as "the provided model identifier is invalid". The lookup is fire-and-forget
+		// at construction time; createMessage() awaits the cached promise before the
+		// first invocation so the cache is populated by the time the prefix decision
+		// is made.
+		this.crossRegionProfileIdsPromise = this.loadCrossRegionInferenceProfileIds()
+			.then((ids) => {
+				this.crossRegionProfileIdsResolved = ids
+				// Force getModel() to recompute now that AWS-published ids are known.
+				// The constructor seeded `costModelConfig` while the cache was still
+				// `undefined`, so a buggy prefixed id may have been cached. Clearing
+				// `id` here makes the next getModel() call take the full path and
+				// re-derive the correct id under the new gating rules.
+				this.costModelConfig = { id: "", info: this.costModelConfig.info }
+				this.costModelConfig = this.getModel()
+				return ids
+			})
+			.catch((error) => {
+				// Silently fall back to legacy behavior (apply prefix unconditionally)
+				// when discovery fails. The most common cause is the IAM principal not
+				// being granted `bedrock:ListInferenceProfiles`; we don't want to break
+				// users whose existing setups work today just because we added a new
+				// API call.
+				this.crossRegionProfileIdsResolved = null
+				logger.info(
+					"Bedrock cross-region inference profile discovery failed; preserving legacy prefix behavior",
+					{
+						ctx: "bedrock",
+						errorMessage: error instanceof Error ? error.message : String(error),
+					},
+				)
+				return null
+			})
+	}
+
+	/**
+	 * Lazily fetch the set of cross-region (system) inference-profile ids that AWS has
+	 * published in the user's region, e.g. `us.anthropic.claude-...`, `us.moonshotai.kimi-k2.5`.
+	 * Used by `getModel()` to decide whether prepending the regional prefix to a foundation-model
+	 * id will route correctly. Returns `null` when discovery cannot be performed (no region,
+	 * cross-region toggle disabled, missing IAM permission, or network error) so the caller
+	 * can fall back to legacy unconditional-prefix behavior.
+	 */
+	private async loadCrossRegionInferenceProfileIds(): Promise<Set<string> | null> {
+		if (!this.options.awsRegion) {
+			return null
+		}
+		if (!this.options.awsUseCrossRegionInference) {
+			// No reason to call AWS if the user hasn't even toggled cross-region inference.
+			return null
+		}
+
+		const config: BedrockClientConfig = {
+			userAgentAppId: `ZooCode#${Package.version}`,
+			region: this.options.awsRegion,
+		}
+		if (this.options.awsUseApiKey && this.options.awsApiKey) {
+			config.token = { token: this.options.awsApiKey }
+			config.authSchemePreference = ["httpBearerAuth"]
+		} else if (this.options.awsUseProfile && this.options.awsProfile) {
+			config.credentials = fromIni({
+				profile: this.options.awsProfile,
+				ignoreCache: true,
+			})
+		} else if (this.options.awsAccessKey && this.options.awsSecretKey) {
+			config.credentials = {
+				accessKeyId: this.options.awsAccessKey,
+				secretAccessKey: this.options.awsSecretKey,
+				...(this.options.awsSessionToken ? { sessionToken: this.options.awsSessionToken } : {}),
+			}
+		}
+
+		const controlClient = new BedrockClient(config)
+		const ids = new Set<string>()
+		let nextToken: string | undefined
+		do {
+			const response = await controlClient.send(new ListInferenceProfilesCommand({ nextToken, maxResults: 100 }))
+			for (const summary of response.inferenceProfileSummaries ?? []) {
+				if (summary.inferenceProfileId) {
+					ids.add(summary.inferenceProfileId)
+				}
+			}
+			nextToken = response.nextToken
+		} while (nextToken)
+		return ids
 	}
 
 	/**
@@ -466,65 +576,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		)
 	}
 
-	// Helper to guess model info from custom modelId string if not in bedrockModels
-	private guessModelInfoFromId(modelId: string): Partial<ModelInfo> {
-		// Define a mapping for model ID patterns and their configurations
-		const modelConfigMap: Record<string, Partial<ModelInfo>> = {
-			"claude-4": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-7": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-5": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-4-opus": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-opus": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-haiku": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-		}
-
-		// Match the model ID to a configuration
-		const id = modelId.toLowerCase()
-		for (const [pattern, config] of Object.entries(modelConfigMap)) {
-			if (id.includes(pattern)) {
-				return config
-			}
-		}
-
-		// Default fallback
-		return {
-			maxTokens: BEDROCK_MAX_TOKENS,
-			contextWindow: BEDROCK_DEFAULT_CONTEXT,
-			supportsImages: false,
-			supportsPromptCache: false,
-		}
-	}
-
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -536,6 +587,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 		},
 	): ApiStream {
+		// Ensure the cross-region inference profile id allowlist (if a lookup was kicked
+		// off in the constructor) has resolved before the first getModel() call below, so
+		// the prefix-gating decision in getModel() uses AWS-confirmed data rather than the
+		// `undefined` placeholder.
+		if (this.crossRegionProfileIdsPromise) {
+			await this.crossRegionProfileIdsPromise
+		}
+
 		const modelConfig = this.getModel()
 		const usePromptCache = Boolean(
 			(this.options.awsUsePromptCache ?? true) && this.supportsAwsPromptCache(modelConfig),
@@ -1332,62 +1391,38 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 	//This strips any region prefix that used on cross-region model inference ARNs
 	private parseBaseModelId(modelId: string): string {
-		if (!modelId) {
-			return modelId
-		}
-
-		// Remove AWS cross-region inference profile prefixes
-		// as defined in AWS_INFERENCE_PROFILE_MAPPING
-		for (const [_, inferenceProfile] of AWS_INFERENCE_PROFILE_MAPPING) {
-			if (modelId.startsWith(inferenceProfile)) {
-				// Remove the inference profile prefix from the model ID
-				return modelId.substring(inferenceProfile.length)
-			}
-		}
-
-		// Also strip Global Inference profile prefix if present
-		if (modelId.startsWith("global.")) {
-			return modelId.substring("global.".length)
-		}
-
-		// Return the model ID as-is for all other cases
-		return modelId
+		return parseBedrockBaseModelId(modelId)
 	}
 
 	//Prompt Router responses come back in a different sequence and the model used is in the response and must be fetched by name
 	getModelById(modelId: string, modelType?: string): { id: BedrockModelId | string; info: ModelInfo } {
-		// Try to find the model in bedrockModels
-		const baseModelId = this.parseBaseModelId(modelId) as BedrockModelId
-
 		let model
-		if (baseModelId in bedrockModels) {
-			//Do a deep copy of the model info so that later in the code the model id and maxTokens can be set.
-			// The bedrockModels array is a constant and updating the model ID from the returned invokedModelID value
-			// in a prompt router response isn't possible on the constant.
-			model = { id: baseModelId, info: JSON.parse(JSON.stringify(bedrockModels[baseModelId])) }
+		const resolved = resolveBedrockModelInfo({
+			baseModelId: this.parseBaseModelId(modelId),
+			targetId: modelId,
+			optIn1MContext: this.options.awsBedrock1MContext,
+			modelMaxTokens: this.options.modelMaxTokens,
+			contextWindowOverride: this.options.awsModelContextWindow,
+			// NOTE: `awsModelMaxOutputTokens` (an empirically-probed static max-output-tokens
+			// override) is a T6 (fork/06-bedrock-max-output-tokens) field that does not exist
+			// in the provider-settings schema yet, so `maxOutputTokensOverride` is deliberately
+			// omitted here. Wire it through once T6 lands.
+		})
+
+		if (resolved.baseModelId in bedrockModels) {
+			// resolveBedrockModelInfo already returns a fresh (non-shared) ModelInfo object,
+			// so no additional deep-copy is required here.
+			model = { id: resolved.baseModelId, info: resolved.info }
 		} else if (modelType && modelType.includes("router")) {
 			model = {
 				id: bedrockDefaultPromptRouterModelId,
 				info: JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultPromptRouterModelId])),
 			}
 		} else {
-			// Use heuristics for model info, then allow overrides from ProviderSettings
-			const guessed = this.guessModelInfoFromId(modelId)
 			model = {
-				id: bedrockDefaultModelId,
-				info: {
-					...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
-					...guessed,
-				},
+				id: resolved.baseModelId || bedrockDefaultModelId,
+				info: resolved.info,
 			}
-		}
-
-		// Always allow user to override detected/guessed maxTokens and contextWindow
-		if (this.options.modelMaxTokens && this.options.modelMaxTokens > 0) {
-			model.info.maxTokens = this.options.modelMaxTokens
-		}
-		if (this.options.awsModelContextWindow && this.options.awsModelContextWindow > 0) {
-			model.info.contextWindow = this.options.awsModelContextWindow
 		}
 
 		return model
@@ -1415,6 +1450,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		let modelConfig = undefined
+		const explicitTargetKind = this.options.awsCustomArn
+			? "custom-arn"
+			: inferBedrockInvokeTargetKind({
+					targetId: this.options.awsBedrockInvokeTarget || (this.options.apiModelId as string),
+					explicitKind: this.options.awsBedrockTargetKind,
+				})
 
 		// If custom ARN is provided, use it
 		if (this.options.awsCustomArn) {
@@ -1425,51 +1466,86 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			//Otherwise the ARN is not a foundation-model resource type that ARN should be used as the identifier in Bedrock interactions
 			if (this.arnInfo.modelType !== "foundation-model") modelConfig.id = this.options.awsCustomArn
 		} else {
-			//a model was selected from the drop down
-			modelConfig = this.getModelById(this.options.apiModelId as string)
+			const configuredTargetId = this.options.awsBedrockInvokeTarget || (this.options.apiModelId as string)
 
-			// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
-			const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
-			let profilePrefixApplied = false
+			// A discovered/profile target was explicitly selected, so invoke it directly.
 			if (
-				this.options.awsUseGlobalInference &&
-				BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
+				explicitTargetKind === "system-profile" ||
+				explicitTargetKind === "application-profile" ||
+				explicitTargetKind === "prompt-router"
 			) {
-				modelConfig.id = `global.${baseIdForGlobal}`
-				profilePrefixApplied = true
-			}
-			// Otherwise, add cross-region inference prefix if enabled
-			else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
-				const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
-				if (prefix) {
-					modelConfig.id = `${prefix}${modelConfig.id}`
+				modelConfig = this.getModelById(configuredTargetId)
+				// Strip any synthetic `:1m` (or `[1m]`) suffix before sending to AWS.
+				// The suffix is purely a UI marker for the 1M-context variant and is not
+				// a real part of the AWS inference profile / foundation model id.
+				// The 1M context-window and `context-1m-2025-08-07` beta header have
+				// already been applied inside getModelById via resolveBedrockModelInfo.
+				modelConfig.id = stripBedrock1MContextSuffix(configuredTargetId)
+			} else {
+				// A foundation model was selected, so optional routing toggles still apply.
+				modelConfig = this.getModelById(configuredTargetId)
+
+				// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
+				const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
+				let profilePrefixApplied = false
+				if (
+					this.options.awsUseGlobalInference &&
+					BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
+				) {
+					modelConfig.id = `global.${baseIdForGlobal}`
 					profilePrefixApplied = true
 				}
-			}
+				// Otherwise, add cross-region inference prefix if enabled.
+				// Gate on the AWS-confirmed regional profile id set so we don't unconditionally
+				// prepend a prefix that doesn't yet have a published system inference profile
+				// (e.g. brand-new foundation models like moonshotai.kimi-k2.5 in 2026 - AWS
+				// makes them invokable on-demand BEFORE the matching `us.<id>` profile exists,
+				// and prepending the prefix anyway yields "the provided model identifier is
+				// invalid"). When the discovery cache is unavailable (still loading, lookup
+				// failed, or no IAM permission) we preserve legacy behavior and apply the
+				// prefix as before so we don't regress users whose existing setups work today.
+				else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
+					const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
+					if (prefix) {
+						const candidatePrefixedId = `${prefix}${modelConfig.id}`
+						const profiles = this.crossRegionProfileIdsResolved
+						if (profiles == null || profiles.has(candidatePrefixedId)) {
+							modelConfig.id = candidatePrefixedId
+							profilePrefixApplied = true
+						}
+						// else: AWS has NOT published this regional profile in the user's
+						// region. Leave the bare id alone; on-demand invocation against the
+						// foundation-model id is the correct routing in that case.
+					}
+				}
 
-			// R1 (mandatory inference profile): some new models (GPT-5.6/6 family,
-			// Kimi K3 - see BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS) cannot be
-			// invoked at all via their base id on bedrock-runtime; AWS requires an
-			// inference profile even when the user has opted into neither Global nor
-			// cross-region inference. This is deliberately a separate `if`, not an
-			// `else if`, so it also covers the case where cross-region inference was
-			// enabled but the configured region has no entry in
-			// AWS_INFERENCE_PROFILE_MAPPING (profilePrefixApplied stays false there
-			// too) - those users would otherwise still send an unprefixed,
-			// unusable id for these models.
-			//
-			// Prefix choice mirrors AwsBedrockHandler.getPrefixForRegion() - the same
-			// region-to-prefix table the opt-in cross-region path above uses - rather
-			// than introducing a second table. Only `us.` and `global.` are confirmed
-			// by AWS for these models (research doc section 1); the other regional
-			// prefixes (au./eu./apac./jp./ca./sa./ug.) are unverified for them, so
-			// falling back to `global.` when the region isn't in the table (or isn't
-			// set) picks the one AWS explicitly documents as broadly available.
-			if (!profilePrefixApplied && isMemberOf(BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS, baseIdForGlobal)) {
-				const prefix =
-					(this.options.awsRegion && AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)) ||
-					"global."
-				modelConfig.id = `${prefix}${modelConfig.id}`
+				// R1 (mandatory inference profile): some new models (GPT-5.6/6 family,
+				// Kimi K3 - see BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS) cannot be
+				// invoked at all via their base id on bedrock-runtime; AWS requires an
+				// inference profile even when the user has opted into neither Global nor
+				// cross-region inference. This is deliberately a separate `if`, not an
+				// `else if`, so it also covers the case where cross-region inference was
+				// enabled but the configured region has no entry in
+				// AWS_INFERENCE_PROFILE_MAPPING (profilePrefixApplied stays false there
+				// too) - those users would otherwise still send an unprefixed,
+				// unusable id for these models.
+				//
+				// Prefix choice mirrors AwsBedrockHandler.getPrefixForRegion() - the same
+				// region-to-prefix table the opt-in cross-region path above uses - rather
+				// than introducing a second table. Only `us.` and `global.` are confirmed
+				// by AWS for these models (research doc section 1); the other regional
+				// prefixes (au./eu./apac./jp./ca./sa./ug.) are unverified for them, so
+				// falling back to `global.` when the region isn't in the table (or isn't
+				// set) picks the one AWS explicitly documents as broadly available.
+				if (
+					!profilePrefixApplied &&
+					isMemberOf(BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS, baseIdForGlobal)
+				) {
+					const prefix =
+						(this.options.awsRegion && AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)) ||
+						"global."
+					modelConfig.id = `${prefix}${modelConfig.id}`
+				}
 			}
 		}
 

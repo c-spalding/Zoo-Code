@@ -111,9 +111,6 @@ vi.mock("../providers", () => {
 	}
 })
 
-vi.mock("../providers/BedrockCustomArn", () => ({
-	BedrockCustomArn: () => <div data-testid="bedrock-custom-arn" />,
-}))
 vi.mock("../ModelPicker", () => ({ ModelPicker: () => null }))
 vi.mock("../ApiErrorMessage", () => ({
 	ApiErrorMessage: ({ errorMessage }: { errorMessage: string }) => <div>{String(errorMessage)}</div>,
@@ -465,32 +462,6 @@ describe("ApiOptions interactions", () => {
 
 		expect(setApiConfigurationField).toHaveBeenCalledWith("apiProvider", providerIdentifiers.bedrock)
 		expect(setApiConfigurationField).toHaveBeenCalledWith("apiModelId", bedrockDefaultModelId, false)
-	})
-
-	it("renders the custom ARN settings only for Bedrock's custom ARN pseudo-model", () => {
-		const { rerender } = render(
-			<ApiOptions
-				errorMessage={undefined}
-				setErrorMessage={() => undefined}
-				uriScheme={undefined}
-				apiConfiguration={{ apiProvider: providerIdentifiers.bedrock, apiModelId: "custom-arn" }}
-				setApiConfigurationField={() => undefined}
-			/>,
-		)
-
-		expect(screen.getByTestId("bedrock-custom-arn")).toBeInTheDocument()
-
-		rerender(
-			<ApiOptions
-				errorMessage={undefined}
-				setErrorMessage={() => undefined}
-				uriScheme={undefined}
-				apiConfiguration={{ apiProvider: providerIdentifiers.bedrock, apiModelId: bedrockDefaultModelId }}
-				setApiConfigurationField={() => undefined}
-			/>,
-		)
-
-		expect(screen.queryByTestId("bedrock-custom-arn")).not.toBeInTheDocument()
 	})
 
 	it("syncs the selected model into the config when the model id differs", () => {

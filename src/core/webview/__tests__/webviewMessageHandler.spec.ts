@@ -538,7 +538,7 @@ describe("webviewMessageHandler - requestBedrockDiscovery", () => {
 				baseModelId: "anthropic.claude-sonnet-5",
 				targetKind: "foundation-model" as const,
 				contextWindow: 200_000,
-				contextSource: "known" as const,
+				contextSource: "base" as const,
 			},
 		]
 
