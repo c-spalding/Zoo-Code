@@ -337,71 +337,135 @@ commit (`c5d90ce8b`) -- extract T3's hunks before T4's. T2 (catalog corrections 
 
 **Order:** 3rd (branch `fork/02-bedrock-catalog`)
 
+**Status: VERIFIED, NO-OP on the kimi-k2 key -- MERGED** (2026-10-02). The premise
+("the catalog key needs renaming to `moonshotai.`") was checked empirically against
+live AWS Bedrock before writing any code and found to be **false**. See the decision
+trail below. The other two items in this tranche (`707479d6f` ON_DEMAND filter,
+`a7f475f36` 1M-expansion dedup) were already carried by T4's re-application (verified
+present in [`src/api/providers/bedrock-discovery.ts`](src/api/providers/bedrock-discovery.ts:68)
+and [`expandBedrockTargetsWith1MVariants`](packages/types/src/providers/bedrock.ts:1090)
+respectively -- T4's own commit history folded them in rather than deferring them, since
+they share the exact same code T4 was writing). This tranche's only actual deliverable
+is a regression test and a documentation decision trail.
+
 ### Purpose
 
-Three small, independent correctness fixes to the Bedrock model catalog and discovery
-filtering: a wrong AWS model-id prefix, foundation models surfaced that cannot actually
-be invoked, and a UI double-render bug. User-facing benefit: fewer silent
-misclassifications and no duplicate dropdown rows.
+Originally scoped as three independent correctness fixes (wrong AWS model-id prefix,
+foundation models surfaced that cannot actually be invoked, a UI double-render bug).
+After verification, only the test-and-document half of item 2.1 (the kimi-k2 prefix)
+remains as net-new work for this tranche; items 2.2/2.3 are already in place via T4.
 
 ### Provider-setting / global-setting keys
 
-None. Pure bug fixes.
+None. Pure verification + regression test.
+
+### Decision trail: the `moonshot.kimi-k2-thinking` catalog key (2026-10-02)
+
+**Premise as stated by the archive fork (commit `d388efc12`):** AWS publishes this
+model under the `moonshotai.` prefix (note the trailing "i"); the original PR #125
+catalog entry used `moonshot.` (no "i"), which never matches, so discovery/lookups fall
+through to the generic 128K-context guess instead of the model's real 256K window. The
+archive renamed the key to `moonshotai.kimi-k2-thinking` to fix this.
+
+**Status of that fix at this re-baseline's HEAD, before this tranche:** NEVER applied.
+HEAD's catalog has always carried the key as `moonshot.kimi-k2-thinking` -- the rename
+in `d388efc12` exists only on `archive/zoo-base-3.56`, not on any ancestor of
+`feature/zoo-base`.
+
+**Conflicting secondary evidence found during this tranche's research** (
+`plans/new-bedrock-models-research.md`, section 2c, dated 2026-09-28): a since-added
+research doc claims, citing AWS's K2-Thinking model card, that the model has **two
+different ids depending on API plane** -- `moonshot.kimi-k2-thinking` on
+`bedrock-runtime` (the actual Converse invocation plane this extension calls) versus
+`moonshotai.kimi-k2-thinking` on `bedrock-mantle` (a separate control/catalog plane).
+That doc explicitly warns "do not normalise" the two Moonshot prefixes together (by
+contrast with the sibling `moonshotai.kimi-k3` entry, which genuinely only exists under
+the `moonshotai.` prefix). Taken at face value, this raised the possibility that our own
+`discoverBedrockTargets()` -- which calls `ListFoundationModelsCommand`, a control-plane
+API -- might surface `moonshotai.kimi-k2-thinking` as a discovered target id, which would
+neither match the HEAD catalog key for metadata purposes nor necessarily be the correct
+id to invoke on `bedrock-runtime`. Per this task's guardrails (both-ids-live-and-
+conflicting => ask, don't guess), this was escalated to the user rather than resolved by
+code inspection alone.
+
+**Empirical resolution (live AWS calls, `bedrock` CLI profile, account
+`696666580195`, region `us-east-1`, 2026-10-02):**
+
+1. `aws bedrock list-foundation-models` (the control-plane API -- exactly what
+   `ListFoundationModelsCommand`/`discoverBedrockTargets` calls) returned this model as
+   `modelId: "moonshot.kimi-k2-thinking"`, `inferenceTypesSupported: ["ON_DEMAND"]`.
+   **No `moonshotai.kimi-k2-thinking` entry exists on the control plane at all.**
+2. `aws bedrock-runtime converse --model-id moonshot.kimi-k2-thinking` **succeeded**
+   (returned a real completion).
+3. `aws bedrock-runtime converse --model-id moonshotai.kimi-k2-thinking` **failed**:
+   `ValidationException: The provided model identifier is invalid.`
+
+**Verdict:** the archive's `d388efc12` fix was wrong. HEAD's existing catalog key
+(`moonshot.kimi-k2-thinking`) is correct on both the control plane our discovery feature
+queries and the runtime plane that actually invokes the model. The research doc's claim
+of a plane-dependent `moonshotai.` id does not hold for this specific model in this
+specific account/region. **No catalog change was made.** The sibling `moonshotai.kimi-k3`
+entry is unaffected and correctly keeps its own, genuinely different, prefix.
+
+**What was applied as a result:** a code comment on the catalog entry
+([`packages/types/src/providers/bedrock.ts:729`](packages/types/src/providers/bedrock.ts:729))
+documenting this verification inline (so a future contributor does not rediscover and
+re-litigate the same question), plus a new regression-test file,
+[`packages/types/src/providers/__tests__/bedrock-catalog.spec.ts`](packages/types/src/providers/__tests__/bedrock-catalog.spec.ts),
+asserting: the key stays `moonshot.` (not `moonshotai.`), `parseBedrockBaseModelId`
+does not rewrite it, `resolveBedrockModelInfo` resolves it to the real 256K/32K catalog
+entry (not the 128K default guess), the archive's proposed `moonshotai.` id does
+_not_ also resolve to the same entry (confirming no accidental cross-prefix
+normalisation exists in the lookup path), and `moonshotai.kimi-k3` remains distinct.
 
 ### Principal files
 
-| File                                                                                                                   | New/Modified                                                       |
-| ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                   | Modified -- `moonshot.` -> `moonshotai.` key rename                |
-| [`src/api/providers/bedrock-discovery.ts`](src/api/providers/bedrock-discovery.ts)                                     | Modified -- `ON_DEMAND` inference-type filter                      |
-| [`webview-ui/src/components/settings/providers/Bedrock.tsx`](webview-ui/src/components/settings/providers/Bedrock.tsx) | Modified -- `availableTargets` memo, drop second-pass 1M expansion |
+| File                                                                                                                               | New/Modified                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                               | Modified -- comment only, documenting the verified decision; key unchanged |
+| [`packages/types/src/providers/__tests__/bedrock-catalog.spec.ts`](packages/types/src/providers/__tests__/bedrock-catalog.spec.ts) | New -- regression test for the key + lookup-path non-normalisation         |
+| [`src/api/providers/bedrock-discovery.ts`](src/api/providers/bedrock-discovery.ts)                                                 | Unchanged this tranche -- `ON_DEMAND` filter already present, added by T4  |
+| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts) (`expandBedrockTargetsWith1MVariants`)        | Unchanged this tranche -- 1M-expansion dedup already present, added by T4  |
 
 ### Source commits on `archive/zoo-base-3.56`
 
 Verified via `git show --stat`:
 
-| Commit      | Subject                                                                      |
-| ----------- | ---------------------------------------------------------------------------- |
-| `d388efc12` | `fix(bedrock): correct moonshot.kimi-k2-thinking catalog key to moonshotai.` |
-| `707479d6f` | `fix(bedrock): drop foundation-model rows that don't support ON_DEMAND`      |
-| `a7f475f36` | `fix(bedrock): drop second-pass 1M-variant expansion in settings dropdown`   |
-
-All three match the review's section 7.2 Tranche 2 commit list exactly.
+| Commit      | Subject                                                                      | Disposition                                                   |
+| ----------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `d388efc12` | `fix(bedrock): correct moonshot.kimi-k2-thinking catalog key to moonshotai.` | **Rejected** -- empirically wrong, see decision trail above   |
+| `707479d6f` | `fix(bedrock): drop foundation-model rows that don't support ON_DEMAND`      | Already present via T4 (`bedrock-discovery.ts:68`)            |
+| `a7f475f36` | `fix(bedrock): drop second-pass 1M-variant expansion in settings dropdown`   | Already present via T4 (`expandBedrockTargetsWith1MVariants`) |
 
 ### Upstream status per recon (drop/keep/adapt)
 
-- `d388efc12` (kimi-k2 key fix): recon feature #10 evidence confirms BASE still carries
-  the **uncorrected** key `moonshot.kimi-k2-thinking` (no trailing "ai"). This is a
-  genuine, unshipped upstream bug -- **keep**, and consider upstreaming it standalone
-  regardless of the rest of this tranche (recon flags it explicitly as a PR candidate).
-- `707479d6f` and `a7f475f36`: both patch code that is itself ABSENT at BASE
-  (`bedrock-discovery.ts` and the discovery-backed `Bedrock.tsx` dropdown do not exist
-  upstream). They are not "superseded" so much as **inseparable from T4** -- apply them
-  as follow-up fixes on top of T4's re-application, not as standalone patches against
-  BASE's current (static-list) Bedrock UI.
+- `d388efc12` (kimi-k2 key fix): the original recon (feature #10) asserted BASE's
+  uncorrected key was a genuine unshipped bug and recommended keeping/upstreaming the
+  rename. **This tranche's empirical verification supersedes that recon finding** -- the
+  rename would have broken live invocation. Do not upstream `d388efc12`'s diff. The
+  recon's underlying observation (HEAD's key differs from the archive's) was correct;
+  its conclusion (that the archive's version was the fix) was not.
+- `707479d6f` and `a7f475f36`: both already folded into T4's re-application (confirmed
+  by reading current `bedrock-discovery.ts` and `bedrock.ts` at HEAD) -- no action needed
+  in this tranche.
 
 ### Known defects to fix during re-application
 
-None specific to this tranche beyond what T4 already carries.
+None. (The defect this tranche set out to fix does not exist at HEAD.)
 
 ### Dependencies on other tranches
 
-Hard dependency on T4 (see above) for `707479d6f` and `a7f475f36`. `d388efc12` has no
-dependency and can ship independently or even earlier if desired.
+None remaining -- the two items that depended on T4 (`707479d6f`, `a7f475f36`) are
+already satisfied by T4's merged implementation.
 
 ### Before upstream submission checklist
 
-- [ ] Issue-first + claim.
-- [ ] Branch rebased onto `zoo/main` (for `d388efc12` this can be a trivial standalone
-      rebase; for the other two, rebase onto the T4 PR's branch instead).
+- [x] Verify the premise empirically before writing code -- done, see decision trail.
+- [ ] Issue-first + claim -- N/A, no upstream change proposed (HEAD already matches the
+      correct AWS id; nothing to submit for the kimi-k2 key itself).
 - [ ] i18n: none needed.
-- [ ] `.changeset/` entry per fix (or one entry covering all three if submitted
-      together), `patch` impact.
-- [ ] Tests: existing coverage should suffice; add a regression test for the kimi-k2 key
-      if none exists.
-- [ ] Tranche-specific prerequisite from review section 7.2 Tranche 2: if submitting
-      2.2/2.3 independently of Tranche 4, port the fixes against the legacy code paths
-      and rewrite the rationale -- otherwise submit after T4 lands.
+- [ ] `.changeset/` entry: none needed (no functional change).
+- [x] Tests: regression test added (`bedrock-catalog.spec.ts`).
 
 ---
 

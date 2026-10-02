@@ -726,6 +726,27 @@ export const bedrockModels = {
 		outputPrice: 0.6,
 		description: "Amazon Titan Text Express",
 	},
+	// T2 (fork/02-bedrock-catalog) premise check, 2026-10-02: the archive fork
+	// (archive/zoo-base-3.56 commit d388efc12) renamed this key to
+	// "moonshotai.kimi-k2-thinking", claiming AWS's control-plane id uses the
+	// "moonshotai." prefix and that "moonshot." never matches. That rename was
+	// NEVER actually applied at this re-baseline's HEAD (this entry has always
+	// been "moonshot."), and empirical verification proved the rename would have
+	// been WRONG. Live AWS calls via the `bedrock` CLI profile, us-east-1,
+	// 2026-10-02:
+	//   - `aws bedrock list-foundation-models` (control plane - the same API
+	//     `discoverBedrockTargets`/ListFoundationModelsCommand calls) returns this
+	//     model as modelId "moonshot.kimi-k2-thinking", inferenceTypesSupported
+	//     ["ON_DEMAND"].
+	//   - `aws bedrock-runtime converse --model-id moonshot.kimi-k2-thinking`
+	//     (the actual invocation plane) SUCCEEDS.
+	//   - `aws bedrock-runtime converse --model-id moonshotai.kimi-k2-thinking`
+	//     FAILS: ValidationException "The provided model identifier is invalid."
+	// Do NOT rename this key. See fork-docs/fork-feature-inventory.md T2 section
+	// for the full decision trail; see also plans/new-bedrock-models-research.md,
+	// which asserted (incorrectly, for this specific model) that AWS's
+	// "bedrock-mantle" plane uses "moonshotai." - that claim does not hold on the
+	// control-plane API this codebase actually queries, nor on the runtime plane.
 	"moonshot.kimi-k2-thinking": {
 		maxTokens: 32_000,
 		contextWindow: 262_144,
