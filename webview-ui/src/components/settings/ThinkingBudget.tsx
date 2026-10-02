@@ -32,7 +32,7 @@ Notes:
 - "minimal" uses t("settings:providers.reasoningEffort.minimal").
 */
 
-import { useEffect } from "react"
+import { useEffect, type ReactNode } from "react"
 import { Checkbox } from "vscrui"
 
 import { type ProviderSettings, type ModelInfo, type ReasoningEffortExtended, reasoningEfforts } from "@roo-code/types"
@@ -48,6 +48,8 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Slider, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
+import { MaxOutputTokensControl } from "./MaxOutputTokensControl"
+
 interface ThinkingBudgetProps {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: <K extends keyof ProviderSettings>(
@@ -56,9 +58,28 @@ interface ThinkingBudgetProps {
 		isUserAction?: boolean,
 	) => void
 	modelInfo?: ModelInfo
+	/**
+	 * When true, renders the max-output-tokens control via `MaxOutputTokensControl`
+	 * (slider + numeric input, with room for provider-specific affordances) instead of
+	 * the plain slider used by every other provider. Set by `BedrockThinkingBudget` to
+	 * add the "Detect max output tokens" probe button without changing any other
+	 * provider's rendering.
+	 */
+	useEnhancedMaxOutputControl?: boolean
+	/** Rendered next to the max-output-tokens value (e.g. Bedrock's probe/reset buttons). */
+	maxOutputTokensExtraSlot?: ReactNode
+	/** Rendered below the max-output-tokens control (e.g. probe status text). */
+	maxOutputTokensHelperText?: ReactNode
 }
 
-export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, modelInfo }: ThinkingBudgetProps) => {
+export const ThinkingBudget = ({
+	apiConfiguration,
+	setApiConfigurationField,
+	modelInfo,
+	useEnhancedMaxOutputControl,
+	maxOutputTokensExtraSlot,
+	maxOutputTokensHelperText,
+}: ThinkingBudgetProps) => {
 	const { t } = useAppTranslation()
 	const { id: selectedModelId } = useSelectedModel(apiConfiguration)
 
@@ -177,22 +198,38 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	}
 
 	// Shared markup for the "Max Output Tokens" slider, reused by the standalone control
-	// (supportsMaxTokens models) and the reasoning-budget branch below.
-	const renderMaxTokensSlider = (min: number, max: number, value: number, testId?: string) => (
-		<div className="flex flex-col gap-1" {...(testId ? { "data-testid": testId } : {})}>
-			<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
-			<div className="flex items-center gap-1">
-				<Slider
+	// (supportsMaxTokens models) and the reasoning-budget branch below. When
+	// `useEnhancedMaxOutputControl` is set (Bedrock only, via `BedrockThinkingBudget`),
+	// swaps the plain slider for `MaxOutputTokensControl`, which adds a numeric input and
+	// room for the "Detect max output tokens" probe button/status text.
+	const renderMaxTokensSlider = (min: number, max: number, value: number, testId?: string) =>
+		useEnhancedMaxOutputControl ? (
+			<div className="flex flex-col gap-1" {...(testId ? { "data-testid": testId } : {})}>
+				<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
+				<MaxOutputTokensControl
+					value={value}
 					min={min}
 					max={max}
-					step={1024}
-					value={[value]}
-					onValueChange={([newValue]) => setApiConfigurationField("modelMaxTokens", newValue)}
+					onChange={(newValue) => setApiConfigurationField("modelMaxTokens", newValue)}
+					extraSlot={maxOutputTokensExtraSlot}
+					helperText={maxOutputTokensHelperText}
 				/>
-				<div className="w-12 text-sm text-center">{value}</div>
 			</div>
-		</div>
-	)
+		) : (
+			<div className="flex flex-col gap-1" {...(testId ? { "data-testid": testId } : {})}>
+				<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
+				<div className="flex items-center gap-1">
+					<Slider
+						min={min}
+						max={max}
+						step={1024}
+						value={[value]}
+						onValueChange={([newValue]) => setApiConfigurationField("modelMaxTokens", newValue)}
+					/>
+					<div className="w-12 text-sm text-center">{value}</div>
+				</div>
+			</div>
+		)
 
 	// Standalone max output tokens slider for models that advertise `supportsMaxTokens`
 	// (e.g. Z.ai GLM) but do not surface the reasoning-budget control.

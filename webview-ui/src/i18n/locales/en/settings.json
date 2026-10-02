@@ -655,7 +655,14 @@
 			"currentTargetSuffix": "{{value}} [Current target]",
 			"directModel": "Direct model",
 			"systemProfile": "System profile",
-			"applicationProfile": "Application profile"
+			"applicationProfile": "Application profile",
+			"detectMaxTokens": "Detect max output tokens",
+			"detectMaxTokensProbing": "Detecting...",
+			"detectMaxTokensTooltip": "Send a tiny test request to AWS to empirically discover this model's real max output tokens cap.",
+			"detectMaxTokensSuccess": "Detected cap: {{value}} tokens ({{source}}, {{attempts}} attempt(s)).",
+			"detectMaxTokensOverrideActive": "Using detected cap: {{value}} tokens.",
+			"detectMaxTokensError": "Detection failed: {{error}}",
+			"detectMaxTokensReset": "Reset to default"
 		},
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Use custom VPC endpoint",

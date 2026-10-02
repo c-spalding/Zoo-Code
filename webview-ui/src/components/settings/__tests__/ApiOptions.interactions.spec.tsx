@@ -78,6 +78,7 @@ vi.mock("../providers", () => {
 		Anthropic: provider("provider-anthropic"),
 		Baseten: provider("provider-baseten"),
 		Bedrock: provider("provider-bedrock"),
+		BedrockThinkingBudget: provider("provider-bedrock-thinking-budget"),
 		DeepSeek: provider("provider-deepseek"),
 		Gemini: provider("provider-gemini"),
 		LMStudio: provider("provider-lmstudio"),
