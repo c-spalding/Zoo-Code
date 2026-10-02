@@ -17,7 +17,12 @@ import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
 import { VsCodeLmModelsMessageType } from "./providers/vscode-llm.js"
-import { BedrockDiscoveryMessageType, type BedrockDiscoveredTarget } from "./providers/bedrock.js"
+import {
+	BedrockDiscoveryMessageType,
+	BedrockMaxTokensProbeMessageType,
+	type BedrockDiscoveredTarget,
+	type BedrockMaxOutputProbeResult,
+} from "./providers/bedrock.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
@@ -50,6 +55,7 @@ export interface ExtensionMessage {
 		| typeof LmStudioModelsMessageType.lmStudioModels
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| typeof BedrockDiscoveryMessageType.bedrockDiscovery
+		| typeof BedrockMaxTokensProbeMessageType.bedrockMaxTokensProbe
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -146,6 +152,8 @@ export interface ExtensionMessage {
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
 	bedrockDiscovery?: BedrockDiscoveredTarget[]
+	/** Result payload for the T6 `bedrockMaxTokensProbe` response message. */
+	bedrockMaxTokensProbe?: BedrockMaxOutputProbeResult & { modelId: string }
 	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
@@ -496,6 +504,7 @@ export interface WebviewMessage {
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
 		| typeof BedrockDiscoveryMessageType.requestBedrockDiscovery
+		| typeof BedrockMaxTokensProbeMessageType.requestBedrockMaxTokensProbe
 		| "requestRooModels"
 		| typeof VsCodeLmModelsMessageType.requestVsCodeLmModels
 		| "openImage"

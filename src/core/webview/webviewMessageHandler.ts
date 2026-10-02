@@ -30,6 +30,7 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	BedrockDiscoveryMessageType,
+	BedrockMaxTokensProbeMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
@@ -92,7 +93,7 @@ import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
-import { discoverBedrockTargets } from "../../api/providers/bedrock-discovery"
+import { discoverBedrockTargets, probeBedrockMaxOutputTokens } from "../../api/providers/bedrock-discovery"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1484,6 +1485,35 @@ export const webviewMessageHandler = async (
 					type: BedrockDiscoveryMessageType.bedrockDiscovery,
 					requestId,
 					bedrockDiscovery: [],
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+			break
+		}
+		case BedrockMaxTokensProbeMessageType.requestBedrockMaxTokensProbe: {
+			const requestId = message.requestId
+			const modelId = message.text ?? ""
+			try {
+				const { apiConfiguration } = message
+				if (!apiConfiguration?.awsRegion) {
+					await provider.postMessageToWebview({
+						type: BedrockMaxTokensProbeMessageType.bedrockMaxTokensProbe,
+						requestId,
+						error: "AWS region is required to probe Bedrock max output tokens",
+					})
+					break
+				}
+
+				const result = await probeBedrockMaxOutputTokens({ options: apiConfiguration, modelId })
+				await provider.postMessageToWebview({
+					type: BedrockMaxTokensProbeMessageType.bedrockMaxTokensProbe,
+					requestId,
+					bedrockMaxTokensProbe: { ...result, modelId },
+				})
+			} catch (error) {
+				await provider.postMessageToWebview({
+					type: BedrockMaxTokensProbeMessageType.bedrockMaxTokensProbe,
+					requestId,
 					error: error instanceof Error ? error.message : String(error),
 				})
 			}

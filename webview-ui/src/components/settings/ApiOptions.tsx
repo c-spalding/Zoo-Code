@@ -86,6 +86,7 @@ import {
 	ZooGateway,
 	MiniMax,
 	Mimo,
+	BedrockThinkingBudget,
 } from "./providers"
 
 import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
@@ -766,14 +767,23 @@ const ApiOptions = ({
 						</>
 					)}
 
-					{!fromWelcomeView && (
-						<ThinkingBudget
-							key={`${selectedProvider}-${selectedModelId}`}
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={setApiConfigurationField}
-							modelInfo={selectedModelInfo}
-						/>
-					)}
+					{!fromWelcomeView &&
+						(selectedProvider === providerIdentifiers.bedrock ? (
+							<BedrockThinkingBudget
+								key={`${selectedProvider}-${selectedModelId}`}
+								apiConfiguration={apiConfiguration}
+								setApiConfigurationField={setApiConfigurationField}
+								modelInfo={selectedModelInfo}
+								modelId={selectedModelId}
+							/>
+						) : (
+							<ThinkingBudget
+								key={`${selectedProvider}-${selectedModelId}`}
+								apiConfiguration={apiConfiguration}
+								setApiConfigurationField={setApiConfigurationField}
+								modelInfo={selectedModelInfo}
+							/>
+						))}
 
 					{/* Gate Verbosity UI by capability flag */}
 					{!fromWelcomeView && selectedModelInfo?.supportsVerbosity && (

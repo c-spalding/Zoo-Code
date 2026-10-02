@@ -982,6 +982,37 @@ describe("AwsBedrockHandler", () => {
 			expect(model.info.contextWindow).toBe(100_000)
 		})
 
+		it("should widen maxTokens using awsModelMaxOutputTokens (T6 probe override) when no explicit modelMaxTokens slider value is set", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsModelMaxOutputTokens: 128_000,
+			})
+
+			const model = handler.getModel()
+
+			// The static catalog maxTokens (8192) should be widened to the probed cap.
+			expect(model.info.maxTokens).toBe(128_000)
+		})
+
+		it("should let the request-time modelMaxTokens slider still win over awsModelMaxOutputTokens (cost control)", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsModelMaxOutputTokens: 128_000,
+				modelMaxTokens: 4096,
+			})
+
+			const model = handler.getModel()
+
+			// Explicit slider value should still take precedence over the wider probed cap.
+			expect(model.info.maxTokens).toBe(4096)
+		})
+
 		it("should handle unknown models with sensible defaults", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: "unknown.model.id",

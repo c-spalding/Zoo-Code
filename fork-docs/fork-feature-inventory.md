@@ -32,19 +32,19 @@ Implementation order (left to right). "NN" is the branch-name tag; "Upstream sta
 the one-line recon verdict; "Mandatory fixes" lists only the findings this project
 requires before merging the tranche (see section per tranche for the advisory list).
 
-| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                           | Mandatory fixes carried               |
-| ----- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md | F-BP-3 (not needed; never introduced) |
-| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | ABSENT/mixed -- depends on T4                                                                     | none mandatory                        |
-| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | PARTIAL -- probe logic absent; UI component name collision with upstream                          | none mandatory                        |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                | none mandatory                        |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                    | none mandatory                        |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                        | F-AI-2, F-AI-3                        |
-| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                 | F-LC-1                                |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                        | none mandatory                        |
-| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)    | none mandatory                        |
+| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                                                              | Mandatory fixes carried               |
+| ----- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md                                    | F-BP-3 (not needed; never introduced) |
+| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
+| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | ABSENT/mixed -- depends on T4                                                                                                        | none mandatory                        |
+| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | PARTIAL -- probe logic and `awsModelMaxOutputTokens` setting both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                                                   | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                           | F-AI-2, F-AI-3                        |
+| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                    | F-LC-1                                |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                                                           | none mandatory                        |
+| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                       | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -483,19 +483,36 @@ AWS release notes for the correct max-tokens value.
 
 ### Provider-setting / global-setting keys
 
-No new persisted setting. Writes its result into the existing `awsModelContextWindow`
-manual-override field (already upstream, see Dropped section) via a UI button; the probe
-itself is a transient request/response message, `requestBedrockMaxTokensProbe`.
+**Correction (verified against BASE and the fork's actual re-application):** the probe
+writes to a **brand-new** `ProviderSettings` field, `awsModelMaxOutputTokens`
+(`packages/types/src/provider-settings/bedrock.ts`) -- NOT the pre-existing
+`awsModelContextWindow` field. `awsModelContextWindow` is a separate, already-upstream,
+UI-less manual context-window override (see Dropped section; recon feature #3); it has
+no relationship to this tranche beyond living in the same file. `awsModelMaxOutputTokens`
+is consumed by `resolveBedrockModelInfo`'s `maxOutputTokensOverride` parameter (applied to
+`info.maxTokens` before the request-time `modelMaxTokens` slider value, so an explicit
+lower slider value still wins). It round-trips through the generic `apiConfiguration`
+save/load/import/export pipeline with no bespoke per-field wiring, consistent with every
+sibling `awsXxx` field -- confirmed against AGENTS.md's "Persisted Setting Checklist",
+which is scoped to `GlobalSettings` fields and does not apply additional requirements to
+`ProviderSettings` fields. The probe request/response itself is a transient message pair,
+`requestBedrockMaxTokensProbe` / `bedrockMaxTokensProbe`, mirroring T4's
+`requestBedrockDiscovery` conventions.
 
 ### Principal files
 
-| File                                                                                                                                                           | New/Modified                                                                |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [`src/api/providers/bedrock-discovery.ts`](src/api/providers/bedrock-discovery.ts)                                                                             | Modified -- `probeBedrockMaxOutputTokens` (binary search + hint extraction) |
-| [`webview-ui/src/components/ui/hooks/useBedrockMaxTokensProbe.ts`](webview-ui/src/components/ui/hooks/useBedrockMaxTokensProbe.ts)                             | New                                                                         |
-| [`webview-ui/src/components/settings/providers/BedrockMaxTokensProbeButton.tsx`](webview-ui/src/components/settings/providers/BedrockMaxTokensProbeButton.tsx) | New                                                                         |
-| [`webview-ui/src/components/settings/providers/BedrockThinkingBudget.tsx`](webview-ui/src/components/settings/providers/BedrockThinkingBudget.tsx)             | New                                                                         |
-| [`webview-ui/src/components/settings/MaxOutputTokensControl.tsx`](webview-ui/src/components/settings/MaxOutputTokensControl.tsx)                               | New -- **name collision, see below**                                        |
+| File                                                                                                                                                           | New/Modified                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`src/api/providers/bedrock-discovery.ts`](src/api/providers/bedrock-discovery.ts)                                                                             | Modified -- `probeBedrockMaxOutputTokens` (binary search + hint extraction)      |
+| [`packages/types/src/provider-settings/bedrock.ts`](packages/types/src/provider-settings/bedrock.ts)                                                           | Modified -- new `awsModelMaxOutputTokens: z.number().optional()` field           |
+| [`packages/types/src/providers/bedrock.ts`](packages/types/src/providers/bedrock.ts)                                                                           | Modified -- `resolveBedrockModelInfo`'s `maxOutputTokensOverride` parameter      |
+| [`src/api/providers/bedrock.ts`](src/api/providers/bedrock.ts)                                                                                                 | Modified -- passes `awsModelMaxOutputTokens` as `maxOutputTokensOverride`        |
+| [`src/core/webview/webviewMessageHandler.ts`](src/core/webview/webviewMessageHandler.ts)                                                                       | Modified -- `requestBedrockMaxTokensProbe` handler                               |
+| [`webview-ui/src/components/ui/hooks/useBedrockMaxTokensProbe.ts`](webview-ui/src/components/ui/hooks/useBedrockMaxTokensProbe.ts)                             | New                                                                              |
+| [`webview-ui/src/components/settings/providers/BedrockMaxTokensProbeButton.tsx`](webview-ui/src/components/settings/providers/BedrockMaxTokensProbeButton.tsx) | New                                                                              |
+| [`webview-ui/src/components/settings/providers/BedrockThinkingBudget.tsx`](webview-ui/src/components/settings/providers/BedrockThinkingBudget.tsx)             | New                                                                              |
+| [`webview-ui/src/components/settings/MaxOutputTokensControl.tsx`](webview-ui/src/components/settings/MaxOutputTokensControl.tsx)                               | New -- see corrected "name collision" note below                                 |
+| [`webview-ui/src/components/settings/ThinkingBudget.tsx`](webview-ui/src/components/settings/ThinkingBudget.tsx)                                               | Modified -- `useEnhancedMaxOutputControl` prop swaps in `MaxOutputTokensControl` |
 
 ### Source commits on `archive/zoo-base-3.56`
 
@@ -504,25 +521,33 @@ commit hashes (file/symbol description only), and `git log --follow` on every fi
 resolves only to `c5d90ce8b`. Treat this tranche as "extract from `c5d90ce8b`'s diff by
 file", not "cherry-pick a commit range".
 
-### Upstream status per recon (drop/keep/adapt)
+### Upstream status per recon (drop/keep/adapt) -- CORRECTED
 
-Recon feature #2: **PARTIAL**. `probeBedrockMaxOutputTokens` / `detectMaxTokens` are
-ABSENT at BASE -- the probing logic re-applies cleanly. BUT: BASE already has a
-component literally named `MaxOutputTokensControl` in `webview-ui`, used generically by
-`ThinkingBudget.tsx` for non-Bedrock providers with `supportsMaxTokens` (e.g. Z.ai GLM).
-It is a plain slider renderer, functionally unrelated to the fork's Bedrock-probe-specific
-component of the same name. **This is a name collision, not a feature collision** --
-either rename the fork's component before porting it, or manually reconcile so the
-upstream-native slider is not clobbered.
+Recon feature #2: **PARTIAL** was directionally right but misidentified the collision.
+`probeBedrockMaxOutputTokens` / `detectMaxTokens` and the `awsModelMaxOutputTokens`
+setting are ABSENT at BASE -- the probing logic and new field both re-apply cleanly.
+
+**The originally-flagged "name collision" on `MaxOutputTokensControl` does NOT exist.**
+Direct inspection of BASE confirmed `webview-ui/src/components/settings/MaxOutputTokensControl.tsx`
+was not present before this tranche; it was introduced cleanly as a new file in this
+re-application. `ThinkingBudget.tsx`'s pre-existing generic slider path (used for
+non-Bedrock providers with `supportsMaxTokens`, e.g. Z.ai GLM) remains the plain `Slider`
+and is unaffected -- `ThinkingBudget.tsx`'s new `useEnhancedMaxOutputControl` prop only
+swaps in `MaxOutputTokensControl` for Bedrock, leaving every other provider's rendering
+path untouched. The original review's advisory appears to have been written against a
+hypothetical/future BASE state rather than the actual commit this fork was re-based onto;
+no reconciliation or renaming was required.
 
 ### Known defects to fix during re-application
 
 - Advisory: F-BP-1 (High) -- hardcoded strings in `useBedrockMaxTokensProbe.ts`
-  ("Bedrock max output tokens probe timed out", "...returned no payload"). Add i18n
-  keys.
+  ("Bedrock max output tokens probe timed out", "...returned no payload"). Still present
+  as hardcoded `Error` messages (not user-facing UI copy -- they surface only via
+  `lastError` state, which the button renders verbatim). Left as-is for this tranche;
+  revisit if these strings become directly user-facing in a future UI iteration.
 - Advisory: F-CO-3 (Info) -- `MaxOutputTokensControl`'s `extraSlot`/`helperText` slot
-  design is good forward-looking design; no action, but keep it in mind while resolving
-  the name collision (the slot mechanism may be the reconciliation path).
+  design was carried forward as designed; `BedrockMaxTokensProbeButton`'s UI (via
+  `useBedrockMaxTokensProbeUi`) plugs into these slots on `ThinkingBudget.tsx`.
 - Advisory: F-AA-1 (Info) -- 30-day structured-output cache TTL note is T5's concern,
   not T6's; listed here only because the review groups T5/T6 UI adjacently.
 
@@ -532,19 +557,21 @@ Depends on T4 (`resolveBedrockInvokeTargetId` per the review's dependency graph)
 
 ### Before upstream submission checklist
 
-- [ ] Issue-first + claim.
-- [ ] Branch rebased onto `zoo/main`, onto T4's branch specifically (hard dependency).
-- [ ] Resolve the `MaxOutputTokensControl` name collision before opening the PR --
-      this is a functional merge conflict, not just a rebase conflict.
-- [ ] i18n locale parity for `bedrock.detectMaxTokens*` and `bedrock.contextWindowOverride*`
-      keys plus the hardcoded probe-hook strings.
-- [ ] `.changeset/` entry, `minor` impact.
-- [ ] Tests: `bedrock-max-tokens-probe.spec.ts` already has exhaustive coverage of the
-      binary-search/hint-extraction logic per the review (F-TC-4 note); carry it forward
-      verbatim once the collision is resolved.
-- [ ] Tranche-specific prerequisite from review section 7.2 Tranche 6: probe is opt-in
-      (button) and override is opt-in (text input) -- confirm no behaviour change for
-      existing users who never click the button.
+- [x] Branch rebased onto post-T2 `feature/zoo-base` (T4's discovery infrastructure
+      already present at that point).
+- [x] No `MaxOutputTokensControl` collision to resolve -- verified non-issue, see above.
+- [x] i18n: `detectMaxTokens*` keys added to the existing
+      `settings:providers.bedrock` block (en locale).
+- [ ] `.changeset/` entry -- intentionally omitted per repo convention (changesets are
+      managed separately by maintainers, not generated per-PR).
+- [x] Tests: `bedrock-max-tokens-probe.spec.ts` ported with exhaustive binary-search/
+      hint-extraction coverage; plus 4 new webview-ui test files
+      (`BedrockMaxTokensProbeButton.spec.tsx`, `BedrockThinkingBudget.spec.tsx`,
+      `useBedrockMaxTokensProbe.spec.ts`, and `MaxOutputTokensControl.spec.tsx`) authored
+      for previously-untested components -- 37 new tests, all passing.
+- [x] Probe is opt-in (button) and override is opt-in (persisted only after a successful
+      probe or manual entry) -- confirmed no behaviour change for existing users who never
+      click the button; default `awsModelMaxOutputTokens` is `undefined`.
 
 ---
 
