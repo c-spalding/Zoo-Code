@@ -32,19 +32,19 @@ Implementation order (left to right). "NN" is the branch-name tag; "Upstream sta
 the one-line recon verdict; "Mandatory fixes" lists only the findings this project
 requires before merging the tranche (see section per tranche for the advisory list).
 
-| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                                                              | Mandatory fixes carried               |
-| ----- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md                                    | F-BP-3 (not needed; never introduced) |
-| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
-| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | ABSENT/mixed -- depends on T4                                                                                                        | none mandatory                        |
-| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | PARTIAL -- probe logic and `awsModelMaxOutputTokens` setting both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                                                   | none mandatory                        |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                       | none mandatory                        |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                           | F-AI-2, F-AI-3                        |
-| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                    | F-LC-1                                |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                                                           | none mandatory                        |
-| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                       | none mandatory                        |
+| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                                                                  | Mandatory fixes carried               |
+| ----- | ------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md                                        | F-BP-3 (not needed; never introduced) |
+| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
+| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | **MERGED** -- ABSENT/mixed, depends on T4                                                                                                | none mandatory                        |
+| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                                                       | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                               | F-AI-2, F-AI-3                        |
+| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                        | F-LC-1                                |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                                                               | none mandatory                        |
+| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                           | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -472,6 +472,22 @@ already satisfied by T4's merged implementation.
 ## 6. T6 -- Bedrock max-output-tokens probe
 
 **Order:** 4th (branch `fork/06-max-tokens-probe`)
+
+**Status: MERGED** into `feature/zoo-base` (2026-10-02). Commit stack: `58fc0f0d3`
+(backend probe logic + tests), `4919e1e07` (`awsModelMaxOutputTokens` setting +
+`maxOutputTokensOverride` wiring + tests), `d759366bb` (`requestBedrockMaxTokensProbe` /
+`bedrockMaxTokensProbe` message plumbing + tests), `48acac4f3` (webview UI: hook, probe
+button, `BedrockThinkingBudget`, `MaxOutputTokensControl`, `ApiOptions.tsx` wiring +
+tests), `726240b49` (this section's corrections). Merge commit: `599ccc071` into
+`feature/zoo-base` (no conflicts). Both the recon's originally-flagged
+`MaxOutputTokensControl` name collision and the `awsModelContextWindow` field
+misidentification were confirmed non-issues before merging -- see corrected text below.
+
+Known gap carried forward (not fixed in this tranche, cosmetic only):
+`webview-ui/src/components/ui/hooks/useSelectedModel.ts`'s Bedrock branch does not pass
+`maxOutputTokensOverride` through to `resolveBedrockModelInfo()`, so the live settings-UI
+model-info preview does not yet reflect a detected/overridden cap, even though the actual
+backend request path (`src/api/providers/bedrock.ts`) does apply it correctly.
 
 ### Purpose
 
