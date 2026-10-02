@@ -215,6 +215,41 @@ split apart, so extract T3's hunks first and keep a note of what was left for T4
 
 **Order:** 2nd (branch `fork/04-bedrock-discovery`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-02). Branch tip commit: `4ba53de15`
+(commit e). Full commit stack: `51a26de3a` (a: shared pure helpers), `788f8bafb` (b:
+`bedrock-discovery.ts` module), `f30eaf0af` (c: message plumbing), `8796259f4` (d:
+discovery UI + `useSelectedModel` rework), `4ba53de15` (e: `getModel()`/`getModelById()`
+rework via `resolveBedrockModelInfo`/`inferBedrockInvokeTargetKind`, reconciled with
+T11's mandatory-inference-profile logic and T3's adaptive-thinking logic, plus
+cross-region inference-profile-id allowlist gating). Merge commit: `232b303c3` into
+`feature/zoo-base` (no conflicts).
+
+**Scope actually implemented (matches the change list below) with explicit
+deviations:** `awsBedrockStructuredOutput` was deliberately NOT added -- it belongs to
+T5 and is out of scope here. `awsModelMaxOutputTokens` does not exist in the
+provider-settings schema yet (T6 scope) and was omitted from every
+`resolveBedrockModelInfo` call site; T6 must add the field and wire it through this
+tranche's call sites when it lands. The cross-region inference-profile-id allowlist
+gating (lazy, fire-and-forget `ListInferenceProfilesCommand` discovery at
+`AwsBedrockHandler` construction time, awaited by `createMessage()`/`getModel()`) was
+folded into commit (e) rather than split out, since it shares the same `getModel()`
+rework and `BedrockClient` control-plane wiring.
+
+**Defect found and fixed during re-application:** commit (d)'s addition of
+`providerIdentifiers.bedrock` to `PROVIDERS_WITH_CUSTOM_MODEL_UI` made
+`shouldUseGenericModelPicker("bedrock")` permanently return `false`, orphaning a dead
+`BedrockCustomArn` render branch (and its test) in `ApiOptions.tsx` that could never
+execute. Found during the final webview-ui vitest validation pass; removed the dead
+branch and its obsolete test in commit (e).
+
+**Validation results:** `pnpm check-types` clean across the full repo; `packages/types`
+vitest 32/32 files, 460/460 tests; `webview-ui` vitest 162/162 files, 1870/1870 tests;
+`src` Bedrock-related vitest suites 192/192 plus the new
+`bedrock-cross-region-gating.spec.ts` 14/14 tests; eslint clean on every touched file
+with zero `@typescript-eslint/no-explicit-any` suppression-count regressions (private
+test-field access uses bracket notation, e.g. `handler["crossRegionProfileIdsPromise"]`,
+instead of `as any`).
+
 ### Purpose
 
 Replaces Bedrock's static model dropdown with a live query of the account's available
