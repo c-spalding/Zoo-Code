@@ -84,6 +84,7 @@ import {
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
+import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -101,6 +102,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import { resolveEffectiveToolPolicy } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
@@ -112,6 +114,7 @@ import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { InlineThinkingStreamParser } from "../assistant-message/InlineThinkingStreamParser"
+import { TextToolCallExtractor } from "../assistant-message/TextToolCallExtractor"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -4190,9 +4193,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// If the model did not tool use, then we need to tell it to
 					// either use a tool or attempt_completion.
-					const didToolUse = this.assistantMessageContent.some(
+					let didToolUse = this.assistantMessageContent.some(
 						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
 					)
+
+					// Fork tranche T9: models without native function-calling support may
+					// have expressed a tool call as inline XML/invoke/JSON text instead of
+					// a native tool_use block (see getSharedToolUseSection's
+					// textToolCallFallback guidance). Only attempt extraction when the
+					// native path found nothing, so a model that already used native
+					// tool-calling this turn can never also trigger the text-fallback path
+					// for the same response.
+					if (!didToolUse) {
+						const injectedToolUse = await this.applyTextToolCallFallback(
+							assistantMessage,
+							state,
+							currentMode,
+							Boolean(inlineThinkingParser),
+						)
+
+						if (injectedToolUse) {
+							didToolUse = true
+							this.userMessageContentReady = false
+							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+							this.presentAssistantMessageSafe()
+							await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+
+							if (this.abort || this.abandoned) {
+								throw new Error(
+									`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} aborted`,
+								)
+							}
+						}
+					}
 
 					if (!didToolUse) {
 						// Increment consecutive no-tool-use counter
@@ -4359,6 +4392,156 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Fork tranche T9: scans the model's raw text response for an inline XML,
+	 * Anthropic `<invoke>`-style, or JSON tool call when the model used no
+	 * native tool_use block this turn and `textToolCallFallback` is enabled for
+	 * the active profile. This lets models without native function-calling
+	 * support (e.g. open-weight models served through Bedrock) still drive the
+	 * tool-use loop: they are instructed (see `getSharedToolUseSection`) to
+	 * express tool calls as text, and this method parses that text back into
+	 * the same synthetic ToolUse shape the native-protocol path produces.
+	 *
+	 * The extractor's allowlist is `policy.tools`, the SAME effective-tool-policy
+	 * result `system.ts` and `build-tools.ts` compute for prompt/tool
+	 * construction for this request - never an independently re-derived list -
+	 * so a model can never have a text-expressed tool call extracted for a tool
+	 * it was not actually offered this turn (see fork-docs/fork-feature-inventory.md
+	 * T9, "Option C"). The policy is recomputed here rather than reused because
+	 * `system.ts`'s own `policy` local is not cached or exposed to `Task.ts`.
+	 *
+	 * On a successful extraction this method mutates `this.assistantMessageContent`
+	 * (pushing synthetic ToolUse blocks for `presentAssistantMessage` to execute),
+	 * patches the assistant message `addToApiConversationHistory` already saved
+	 * to API history earlier this turn (appending matching tool_use blocks and
+	 * re-saving), and - when the extractor stripped tool-call markup from the
+	 * displayed text - rewrites the visible text block and its `clineMessages`
+	 * entry to the cleaned text. It does not touch `userMessageContentReady` or
+	 * re-present the message; the caller does that once this method returns, so
+	 * the pWaitFor/no-tool-use sequencing stays identical to the native-tool-call
+	 * path.
+	 *
+	 * @param rawAssistantMessage The raw, tag-inclusive accumulated text for this
+	 *   turn (never the inline-thinking-stripped display text - scanning the
+	 *   stripped text was unreliable due to partial-tag buffering at stream end;
+	 *   see fork-feature-inventory.md T9 commit 686a3367b).
+	 * @param state The request's provider-state snapshot - the same one
+	 *   threaded through `getSystemPrompt`/`buildNativeToolsArrayWithRestrictions`
+	 *   for this turn - or undefined if the provider was already gone.
+	 * @param mode The task's own mode slug (never the provider's current mode -
+	 *   see `getSystemPrompt`'s "task-local, not provider state" rule).
+	 * @param inlineThinkingWasActive Whether T8's streaming parser was active
+	 *   for this turn. When true, any thinking tags were already extracted and
+	 *   emitted live during streaming (see the `case "text"` handler above), so
+	 *   this method must not emit `extracted.thinking` a second time - doing so
+	 *   would duplicate the reasoning block.
+	 * @returns True when at least one tool call was extracted and injected.
+	 */
+	private async applyTextToolCallFallback(
+		rawAssistantMessage: string,
+		state: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
+		mode: string,
+		inlineThinkingWasActive: boolean,
+	): Promise<boolean> {
+		if (!this.apiConfiguration.textToolCallFallback || rawAssistantMessage.length === 0) {
+			return false
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return false
+		}
+
+		const codeIndexManager = CodeIndexManagerRegistry.getOrCreate(provider.context, this.cwd)
+		const policy = resolveEffectiveToolPolicy({
+			mode,
+			customModes: state?.customModes,
+			// Reuse the hub already connected earlier in this same request's
+			// getSystemPrompt() call rather than re-triggering
+			// McpServerManager.getInstance()'s connection wait.
+			mcpHub: provider.getMcpHub(),
+			disabledTools: state?.disabledTools,
+			modelInfo: this.cachedStreamingModel?.info,
+			experiments: state?.experiments,
+			todoListEnabled: this.apiConfiguration.todoListEnabled ?? true,
+			codeIndexManager,
+		})
+
+		const extracted = TextToolCallExtractor.extract(rawAssistantMessage, policy.tools)
+
+		if (extracted.toolCalls.length === 0) {
+			return false
+		}
+
+		// Only emit extracted thinking when T8's live streaming parser was not
+		// already active for this turn - otherwise any thinking tags were
+		// already stripped and emitted via say("reasoning", ...) in real time
+		// during streaming, and emitting extracted.thinking here would
+		// duplicate that reasoning block.
+		if (!inlineThinkingWasActive && extracted.thinking.length > 0) {
+			await this.say("reasoning", extracted.thinking, undefined, false)
+		}
+
+		const lastHistoryMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
+		const historyToolUseBlocks: Anthropic.ToolUseBlockParam[] = []
+
+		for (const call of extracted.toolCalls) {
+			// Prefixed and truncated to 8 hex chars - matching this.instanceId's
+			// own crypto.randomUUID().slice(0, 8) convention (see the
+			// constructor). Synthetic tool_use IDs are only compared for
+			// uniqueness within a single turn's own tool_use blocks, so a short
+			// random suffix is sufficient entropy while keeping the ID readable
+			// in logs and API history.
+			const syntheticId = `text-extract-${crypto.randomUUID().slice(0, 8)}`
+			const parsed = NativeToolCallParser.parseToolCall({
+				id: syntheticId,
+				name: call.name,
+				arguments: JSON.stringify(call.params),
+			})
+
+			if (!parsed) {
+				console.warn(
+					`[Task#${this.taskId}] applyTextToolCallFallback: failed to parse extracted tool call for '${call.name}'`,
+				)
+				continue
+			}
+
+			parsed.id = syntheticId
+			this.assistantMessageContent.push(parsed)
+			historyToolUseBlocks.push({
+				type: "tool_use",
+				id: sanitizeToolUseId(syntheticId),
+				name: call.name,
+				input: call.params,
+			})
+		}
+
+		if (historyToolUseBlocks.length === 0) {
+			return false
+		}
+
+		if (lastHistoryMessage?.role === "assistant" && Array.isArray(lastHistoryMessage.content)) {
+			lastHistoryMessage.content.push(...historyToolUseBlocks)
+			await this.saveApiConversationHistory()
+		}
+
+		if (extracted.cleanedText !== rawAssistantMessage) {
+			for (const block of this.assistantMessageContent) {
+				if (block.type === "text") {
+					block.content = extracted.cleanedText
+				}
+			}
+
+			const lastTextMessageIndex = findLastIndex(this.clineMessages, (m) => m.type === "say" && m.say === "text")
+			if (lastTextMessageIndex !== -1) {
+				this.clineMessages[lastTextMessageIndex].text = extracted.cleanedText
+				await this.updateClineMessage(this.clineMessages[lastTextMessageIndex])
+			}
+		}
+
+		return true
+	}
+
+	/**
 	 * Builds the SYSTEM_PROMPT from the caller's provider-state snapshot. This
 	 * method never reads provider state itself: callers that also construct
 	 * runtime tools for the same request (attemptApiRequest, condenseContext,
@@ -4445,6 +4628,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// value above so the system prompt can render them under distinct
 					// headings (see SystemPromptSettings.profileCustomInstructions).
 					profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
+					// Fork tranche T9: mirrors the preview path (generateSystemPrompt.ts) so
+					// "Show System Prompt" never drifts from what the model actually
+					// receives (see fork-docs/fork-feature-inventory.md T9 defect F-AI-3).
+					textToolCallFallback: apiConfiguration?.textToolCallFallback,
 				},
 				undefined, // todoList
 				this.api.getModel().id,
