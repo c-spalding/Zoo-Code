@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Yapılacaklar listesi aracını etkinleştir",
 			"description": "Etkinleştirildiğinde, Zoo görev ilerlemesini takip etmek için yapılacaklar listeleri oluşturabilir ve yönetebilir. Bu, karmaşık görevleri yönetilebilir adımlara organize etmeye yardımcı olur."
+		},
+		"extractInlineThinking": {
+			"label": "Satır içi düşünme etiketlerini çıkar",
+			"description": "Etkinleştirildiğinde, Zoo bir modelin düz metin çıktısındaki <think>, <thinking> ve <reasoning> etiketlerini algılar ve içeriklerini yanıtta ham etiketleri göstermek yerine katlanabilir bir akıl yürütme bloğu olarak görüntüler."
 		}
 	},
 	"experimental": {

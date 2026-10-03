@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Abilita strumento lista di cose da fare",
 			"description": "Quando abilitato, Zoo può creare e gestire liste di cose da fare per tracciare il progresso delle attività. Questo aiuta a organizzare attività complesse in passaggi gestibili."
+		},
+		"extractInlineThinking": {
+			"label": "Estrai tag di pensiero inline",
+			"description": "Quando abilitato, Zoo rileva i tag <think>, <thinking> e <reasoning> nell'output in testo semplice di un modello e visualizza il loro contenuto come un blocco di ragionamento comprimibile, invece di mostrare i tag grezzi nella risposta."
 		}
 	},
 	"experimental": {

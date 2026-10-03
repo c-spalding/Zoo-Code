@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Aktifkan alat daftar tugas",
 			"description": "Saat diaktifkan, Zoo dapat membuat dan mengelola daftar tugas untuk melacak kemajuan tugas. Ini membantu mengatur tugas kompleks menjadi langkah-langkah yang dapat dikelola."
+		},
+		"extractInlineThinking": {
+			"label": "Ekstrak tag pemikiran inline",
+			"description": "Saat diaktifkan, Zoo mendeteksi tag <think>, <thinking>, dan <reasoning> dalam output teks biasa model dan menampilkan isinya sebagai blok penalaran yang dapat dilipat, bukan menampilkan tag mentah dalam respons."
 		}
 	},
 	"experimental": {

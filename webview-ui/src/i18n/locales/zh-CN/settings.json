@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "启用任务清单工具",
 			"description": "启用后，Zoo 可以创建和管理任务清单来跟踪任务进度。这有助于将复杂任务组织成可管理的步骤。"
+		},
+		"extractInlineThinking": {
+			"label": "提取内联思考标签",
+			"description": "启用后，Zoo 会检测模型纯文本输出中的 <think>、<thinking> 和 <reasoning> 标签，并将其内容显示为可折叠的推理块，而不是在响应中显示原始标签。"
 		}
 	},
 	"experimental": {

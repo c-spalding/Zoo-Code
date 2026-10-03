@@ -940,6 +940,10 @@
 		"todoList": {
 			"label": "啟用待辦事項清單工具",
 			"description": "啟用後，Zoo 可以建立和管理待辦事項清單來追蹤任務進度。這有助於將複雜任務組織成可管理的步驟。"
+		},
+		"extractInlineThinking": {
+			"label": "擷取內嵌思考標籤",
+			"description": "啟用後，Zoo 會偵測模型純文字輸出中的 <think>、<thinking> 和 <reasoning> 標籤，並將其內容顯示為可摺疊的推理區塊，而不是在回應中顯示原始標籤。"
 		}
 	},
 	"experimental": {
