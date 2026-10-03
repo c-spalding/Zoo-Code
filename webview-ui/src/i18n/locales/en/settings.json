@@ -1026,6 +1026,10 @@
 		"extractInlineThinking": {
 			"label": "Extract inline thinking tags",
 			"description": "When enabled, Zoo detects <think>, <thinking>, and <reasoning> tags in a model's plain-text output and displays their contents as a collapsible reasoning block, instead of showing the raw tags in the response."
+		},
+		"textToolCallFallback": {
+			"label": "Fall back to text-based tool calls",
+			"description": "When enabled, if the model responds with plain text instead of using a native tool call, Zoo scans the text for an XML, Anthropic-invoke, or JSON-in-fenced-code tool call and executes it. Useful for models without native function-calling support (e.g. many open-weight models served via Bedrock or local inference servers). Models that do support native function-calling are instructed to prefer it, so their behavior is unchanged."
 		}
 	},
 	"experimental": {

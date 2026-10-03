@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Extraer etiquetas de pensamiento en línea",
 			"description": "Cuando está habilitado, Zoo detecta las etiquetas <think>, <thinking> y <reasoning> en la salida de texto plano de un modelo y muestra su contenido como un bloque de razonamiento plegable, en lugar de mostrar las etiquetas sin procesar en la respuesta."
+		},
+		"textToolCallFallback": {
+			"label": "Recurrir a llamadas de herramientas basadas en texto",
+			"description": "Cuando está habilitado, si el modelo responde con texto plano en lugar de usar una llamada de herramienta nativa, Zoo escanea el texto buscando una llamada de herramienta en formato XML, Anthropic-invoke o JSON dentro de un bloque de código y la ejecuta. Útil para modelos sin soporte nativo de llamada de funciones (por ejemplo, muchos modelos de pesos abiertos servidos a través de Bedrock o servidores de inferencia locales). Los modelos que sí admiten llamadas de función nativas son instruidos para preferirlas, por lo que su comportamiento no cambia."
 		}
 	},
 	"experimental": {

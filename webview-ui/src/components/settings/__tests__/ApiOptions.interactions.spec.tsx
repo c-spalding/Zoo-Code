@@ -120,6 +120,7 @@ vi.mock("../ThinkingBudget", () => ({ ThinkingBudget: () => null }))
 vi.mock("../Verbosity", () => ({ Verbosity: () => null }))
 vi.mock("../TodoListSettingsControl", () => ({ TodoListSettingsControl: () => null }))
 vi.mock("../ExtractInlineThinkingSettingsControl", () => ({ ExtractInlineThinkingSettingsControl: () => null }))
+vi.mock("../TextToolCallFallbackSettingsControl", () => ({ TextToolCallFallbackSettingsControl: () => null }))
 vi.mock("../TemperatureControl", () => ({ TemperatureControl: () => null }))
 vi.mock("../RateLimitSecondsControl", () => ({ RateLimitSecondsControl: () => null }))
 vi.mock("../ConsecutiveMistakeLimitControl", () => ({
