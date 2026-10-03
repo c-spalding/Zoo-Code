@@ -662,7 +662,9 @@
 			"detectMaxTokensSuccess": "Detected cap: {{value}} tokens ({{source}}, {{attempts}} attempt(s)).",
 			"detectMaxTokensOverrideActive": "Using detected cap: {{value}} tokens.",
 			"detectMaxTokensError": "Detection failed: {{error}}",
-			"detectMaxTokensReset": "Reset to default"
+			"detectMaxTokensReset": "Reset to default",
+			"structuredOutputLabel": "Use strict structured output for tool calls",
+			"structuredOutputDescription": "Validates tool call arguments against a strict JSON schema for more reliable parsing. Automatically falls back to standard mode for 30 days if a model rejects it."
 		},
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Use custom VPC endpoint",
