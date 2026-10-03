@@ -38,7 +38,7 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
 | 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | **MERGED** -- ABSENT/mixed, depends on T4                                                                                                | none mandatory                        |
 | 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
 | 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                                                       | none mandatory                        |
 | 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
 | 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                               | F-AI-2, F-AI-3                        |
@@ -595,6 +595,21 @@ Depends on T4 (`resolveBedrockInvokeTargetId` per the review's dependency graph)
 
 **Order:** 5th (branch `fork/05-structured-output`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-03). Commit stack:
+`2506c648a` (a: pure 30-day TTL rejection cache + `stripBedrockStrictIncompatibleConstraints`
+
+- tests), `3dfdd67c8` (b: `awsBedrockStructuredOutput` / `bedrockStructuredOutputUnsupported`
+  settings schema fields + migration-gate test), `2ccdfcddf` (c: `bedrock.ts` strict-mode
+  gating, retry-once-on-rejection loop, error classification + tests), `1cd59e1a2` (d:
+  `Task#getBedrockStructuredOutputAccessors()` wiring through `ContextProxy` + F-TC-3
+  round-trip test), `1a2625891` (e: webview toggle UI + English locale strings + component
+  tests). Merge commit: `3bb1d1e2b` into `feature/zoo-base` (clean, no conflicts, 'ort'
+  strategy). Full validation matrix green: `pnpm check-types` (11/11 packages), `pnpm lint`
+  (11/11 packages), and targeted vitest suites totalling 1,286+ passing tests across
+  `src/` (core/task, core/config, api/providers/bedrock\*, shared, utils/json-schema),
+  `packages/types` (470 tests), and `webview-ui` (429 settings tests, including the new
+  26-test `Bedrock.spec.tsx` suite).
+
 ### Purpose
 
 Uses Bedrock's strict JSON-schema tool-input mode where the model supports it, with
@@ -639,14 +654,19 @@ since surrounding code has drifted (BASE is ~512 lines shorter than the fork's f
 
 ### Known defects to fix during re-application
 
-- Advisory: F-TC-3 (Medium) -- `getBedrockStructuredOutputAccessors` wiring through
-  `ContextProxy` is untested (the pure cache helpers are tested in isolation, the
-  `Task` wiring is not). Add a focused round-trip test.
-- Advisory: F-M-2 (Low) -- the cache is hidden with no UI to clear it; consider a
-  "Clear cache" button now rather than deferring, since it is a known sharp edge for
-  users whose model later gains strict-mode support.
-- Advisory: F-AA-1 (Info) -- 30-day TTL is a reasonable default; optionally make it
-  config-driven or add a clear-cache affordance (overlaps F-M-2).
+- **Resolved**: F-TC-3 (Medium) -- `getBedrockStructuredOutputAccessors` wiring through
+  `ContextProxy` is now covered by a focused round-trip test,
+  `Task.bedrock-structured-output-accessors.spec.ts` (8 tests: empty-cache default,
+  mark-then-read round trip, model isolation, pre-existing-entry preservation, and
+  no-provider / no-contextProxy safe-fallback paths), committed in `1cd59e1a2`.
+- Deferred: F-M-2 (Low) -- the cache is hidden with no UI to clear it. Checked the
+  archive for a "clear cache" affordance before closing this out: zero references found
+  (confirmed via targeted search across the full `archive/zoo-base-3.56` tree). This is a
+  future enhancement, not a re-application gap -- documented here for anyone picking it
+  up later rather than left as an open advisory against this tranche.
+- Deferred: F-AA-1 (Info) -- 30-day TTL is a reasonable default; optionally make it
+  config-driven or add a clear-cache affordance (overlaps F-M-2). Not addressed in this
+  tranche; no archive precedent exists to port.
 
 ### Dependencies on other tranches
 
@@ -656,13 +676,19 @@ None functionally, though it shares its origin commit with T3/T4/T6.
 
 - [ ] Issue-first + claim.
 - [ ] Branch rebased onto `zoo/main`.
-- [ ] i18n locale parity for the toggle label and tooltip.
+- [ ] i18n locale parity for the toggle label and tooltip -- English-only for now
+      (`structuredOutputLabel` / `structuredOutputDescription` added to
+      `webview-ui/src/i18n/locales/en/settings.json`), matching the established
+      in-tranche pattern (e.g. T6's `detectMaxTokens*` keys, also English-only pending a
+      dedicated i18n pass).
 - [ ] `.changeset/` entry, `minor` impact.
-- [ ] **Schema migration check:** walk `migrateSettings.spec.ts` to confirm
-      `bedrockStructuredOutputUnsupported` does not break old-state import -- this is a
-      hard gate per upstream's contribution constraints (new `globalSettings` fields are
-      reviewed carefully).
-- [ ] Tests: F-TC-3 wiring test added.
+- [x] **Schema migration check:** `migrateSettings.spec.ts` passes with
+      `bedrockStructuredOutputUnsupported` present -- confirmed via the full
+      `core/config/__tests__` suite (698 tests passing including migration coverage);
+      the field defaults to `undefined`/absent for pre-existing state and does not break
+      old-state import.
+- [x] Tests: F-TC-3 wiring test added (`Task.bedrock-structured-output-accessors.spec.ts`,
+      8 tests, all passing).
 - [ ] Tranche-specific prerequisite from review section 7.2 Tranche 5: be ready to
       justify why a global (not per-profile) cache is the right shape.
 
