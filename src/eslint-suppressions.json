@@ -134,6 +134,11 @@
 			"count": 1
 		}
 	},
+	"api/providers/__tests__/bedrock-structured-output.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 27
+		}
+	},
 	"api/providers/__tests__/bedrock.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 38

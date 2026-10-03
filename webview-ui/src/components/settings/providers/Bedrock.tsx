@@ -455,6 +455,18 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					{t("settings:providers.bedrock.explicitTargetNote")}
 				</div>
 			)}
+			<div>
+				<Checkbox
+					checked={apiConfiguration?.awsBedrockStructuredOutput ?? true}
+					onChange={(checked: boolean) => {
+						setApiConfigurationField("awsBedrockStructuredOutput", checked)
+					}}>
+					{t("settings:providers.bedrock.structuredOutputLabel")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground mt-1 ml-6">
+					{t("settings:providers.bedrock.structuredOutputDescription")}
+				</div>
+			</div>
 			{selectedModelInfo?.supportsPromptCache && (
 				<>
 					<Checkbox

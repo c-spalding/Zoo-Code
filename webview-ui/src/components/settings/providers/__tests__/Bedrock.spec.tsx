@@ -735,4 +735,75 @@ describe("Bedrock Component", () => {
 			expect(screen.getByText("settings:labels.customArn")).toBeInTheDocument()
 		})
 	})
+
+	describe("Structured Output Toggle", () => {
+		const getStructuredOutputCheckboxInput = () =>
+			screen.getByTestId("checkbox-input-settings:providers.bedrock.structuredoutputlabel") as HTMLInputElement
+
+		it("defaults to checked when awsBedrockStructuredOutput is unset", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(getStructuredOutputCheckboxInput().checked).toBe(true)
+		})
+
+		it("reflects awsBedrockStructuredOutput: false as unchecked", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsBedrockStructuredOutput: false,
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(getStructuredOutputCheckboxInput().checked).toBe(false)
+		})
+
+		it("calls setApiConfigurationField with false when toggled off from the default-on state", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			fireEvent.click(getStructuredOutputCheckboxInput())
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsBedrockStructuredOutput", false)
+		})
+
+		it("calls setApiConfigurationField with true when toggled on from an explicit false", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				awsUseProfile: true,
+				awsBedrockStructuredOutput: false,
+			}
+
+			render(
+				<Bedrock
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			fireEvent.click(getStructuredOutputCheckboxInput())
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsBedrockStructuredOutput", true)
+		})
+	})
 })
