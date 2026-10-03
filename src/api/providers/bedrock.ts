@@ -1,6 +1,7 @@
 import {
 	BedrockRuntimeClient,
 	ConverseStreamCommand,
+	ConverseStreamCommandOutput,
 	ConverseCommand,
 	BedrockRuntimeClientConfig,
 	ContentBlock,
@@ -53,7 +54,7 @@ import { ModelInfo as CacheModelInfo } from "../transform/cache-strategy/types"
 import { convertToBedrockConverseMessages as sharedConverter } from "../transform/bedrock-converse-format"
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
-import { normalizeToolSchema } from "../../utils/json-schema"
+import { normalizeToolSchema, stripBedrockStrictIncompatibleConstraints } from "../../utils/json-schema"
 import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
@@ -769,15 +770,24 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			additionalModelRequestFields.anthropic_beta = anthropicBetas
 		}
 
-		const toolConfig: ToolConfiguration = {
-			tools: this.convertToolsForBedrock(metadata?.tools ?? []),
+		// Decide whether to attempt strict structured output on this request. The profile
+		// toggle defaults to ON (enabled when the setting is missing). Strict is only useful
+		// when native tools are present, and we skip it for models we've cached as
+		// unsupported (30-day TTL, see bedrock-structured-output-cache helper).
+		const profileWantsStructuredOutput = this.options.awsBedrockStructuredOutput ?? true
+		const haveNativeTools = (metadata?.tools?.length ?? 0) > 0
+		const modelKnownUnsupported = metadata?.isModelStructuredOutputUnsupported?.(modelConfig.id) ?? false
+		let useStrictStructuredOutput = profileWantsStructuredOutput && haveNativeTools && !modelKnownUnsupported
+
+		const buildToolConfig = (strict: boolean): ToolConfiguration => ({
+			tools: this.convertToolsForBedrock(metadata?.tools ?? [], { strict }),
 			toolChoice: this.convertToolChoiceForBedrock(metadata?.tool_choice),
-		}
+		})
 
 		// Build payload with optional service_tier at top level
 		// Service tier is a top-level parameter per AWS documentation, NOT inside additionalModelRequestFields
 		// https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
-		const payload: BedrockPayloadWithServiceTier = {
+		const buildPayload = (strict: boolean): BedrockPayloadWithServiceTier => ({
 			modelId: modelConfig.id,
 			messages: formatted.messages,
 			system: formatted.system,
@@ -785,10 +795,22 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(additionalModelRequestFields && { additionalModelRequestFields }),
 			// Add anthropic_version at top level when using thinking features
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
-			toolConfig,
+			toolConfig: buildToolConfig(strict),
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
 			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
-		}
+		})
+
+		let payload: BedrockPayloadWithServiceTier = buildPayload(useStrictStructuredOutput)
+
+		// Schema-compile backoff parameters. AWS docs say first-time compilation can take
+		// "up to a few minutes"; we cap total wait at 180s over at most 6 attempts.
+		const COMPILE_INITIAL_DELAY_MS = 3000
+		const COMPILE_GROWTH_FACTOR = 1.7
+		const COMPILE_MAX_STEP_MS = 45_000
+		const COMPILE_MAX_TOTAL_MS = 180_000
+		const COMPILE_MAX_ATTEMPTS = 6
+		let compileAttempts = 0
+		let compileCumulativeMs = 0
 
 		// Create a request-local AbortController with 10 minute timeout. Keeping it
 		// request-local (and detaching the bridge listener in the finally block) means
@@ -823,12 +845,85 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				10 * 60 * 1000,
 			)
 
-			const command = new ConverseStreamCommand(payload)
-			const response = await this.client.send(command, {
-				abortSignal: requestController.signal,
-			})
+			// Retry wrapper for silent recovery from two Bedrock-specific failures at
+			// command-send time (before any stream chunks are yielded):
+			// 1. STRUCTURED_OUTPUT_UNSUPPORTED (400) - strip strict and retry once
+			// 2. STRUCTURED_OUTPUT_COMPILING (400/503) - wait with backoff and retry
+			// Other errors (and any error thrown once the stream has started) fall through
+			// to the existing error handler below.
+			let response: ConverseStreamCommandOutput | undefined
+			while (true) {
+				try {
+					const command = new ConverseStreamCommand(payload)
+					response = await this.client.send(command, {
+						abortSignal: requestController.signal,
+					})
+					break
+				} catch (innerError: unknown) {
+					const innerType = this.getErrorType(innerError)
 
-			if (!response.stream) {
+					// STRUCTURED_OUTPUT_UNSUPPORTED: cache the model as unsupported, emit a
+					// user-visible notice containing the verbatim Bedrock error, and retry
+					// once with strict mode stripped.
+					if (innerType === "STRUCTURED_OUTPUT_UNSUPPORTED" && useStrictStructuredOutput) {
+						metadata?.markModelStructuredOutputUnsupported?.(modelConfig.id)
+						const notice = this.formatErrorMessage(innerError, innerType, true)
+						logger.warn(notice, {
+							ctx: "bedrock",
+							modelId: modelConfig.id,
+							errorType: innerType,
+							errorMessage: innerError instanceof Error ? innerError.message : String(innerError),
+						})
+						yield { type: "text", text: notice + "\n" }
+						useStrictStructuredOutput = false
+						payload = buildPayload(false)
+						continue // retry without strict
+					}
+
+					// STRUCTURED_OUTPUT_COMPILING: Bedrock is compiling the schema grammar
+					// for first-time use. Wait with bounded exponential backoff and poll.
+					if (
+						innerType === "STRUCTURED_OUTPUT_COMPILING" &&
+						compileAttempts < COMPILE_MAX_ATTEMPTS &&
+						compileCumulativeMs < COMPILE_MAX_TOTAL_MS
+					) {
+						const delay = Math.min(
+							COMPILE_INITIAL_DELAY_MS * Math.pow(COMPILE_GROWTH_FACTOR, compileAttempts),
+							COMPILE_MAX_STEP_MS,
+						)
+						const waitSec = Math.round(delay / 1000)
+						const notice = `Bedrock is compiling the tool schema for ${modelConfig.id}. First-time compilation can take a few minutes. Waiting ${waitSec}s before retry ${compileAttempts + 2}/${COMPILE_MAX_ATTEMPTS + 1}...`
+						logger.info(notice, {
+							ctx: "bedrock",
+							modelId: modelConfig.id,
+							errorType: innerType,
+							attempt: compileAttempts + 1,
+						})
+						yield { type: "text", text: notice + "\n" }
+						await new Promise<void>((resolve, reject) => {
+							const handle = setTimeout(resolve, delay)
+							const onAbort = () => {
+								clearTimeout(handle)
+								reject(new Error("Request aborted while waiting for Bedrock schema compile"))
+							}
+							if (requestController.signal.aborted) {
+								clearTimeout(handle)
+								reject(new Error("Request aborted before Bedrock schema compile wait"))
+							} else {
+								requestController.signal.addEventListener("abort", onAbort, { once: true })
+							}
+						})
+						compileCumulativeMs += delay
+						compileAttempts++
+						continue // poll again
+					}
+
+					// Any other error - or exhausted retry budgets - propagate to the outer handler.
+					throw innerError
+				}
+			}
+
+			if (!response || !response.stream) {
 				clearTimeout(timeoutId)
 				throw new Error("No stream available in the response")
 			}
@@ -1655,26 +1750,49 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	/**
 	 * Convert OpenAI tool definitions to Bedrock Converse format
 	 * Transforms JSON Schema to draft 2020-12 compliant format required by Claude models.
+	 * When `opts.strict` is true, sets `strict: true` on each toolSpec so Bedrock enforces
+	 * the tool input schema (structured output). Models that don't support strict return a
+	 * 400 ValidationException; the caller is responsible for detecting that and retrying.
 	 * @param tools Array of OpenAI ChatCompletionTool definitions
+	 * @param opts Configuration options; `strict` enables Bedrock strict structured output.
 	 * @returns Array of Bedrock Tool definitions
 	 */
-	private convertToolsForBedrock(tools: OpenAI.Chat.ChatCompletionTool[]): Tool[] {
+	private convertToolsForBedrock(
+		tools: OpenAI.Chat.ChatCompletionTool[],
+		opts: { strict: boolean } = { strict: false },
+	): Tool[] {
 		return tools
 			.filter((tool) => tool.type === "function")
-			.map(
-				(tool) =>
-					({
-						toolSpec: {
-							name: tool.function.name,
-							description: tool.function.description,
-							inputSchema: {
-								// Normalize schema to JSON Schema draft 2020-12 compliant format
-								// This converts type: ["T", "null"] to anyOf: [{type: "T"}, {type: "null"}]
-								json: normalizeToolSchema(tool.function.parameters as Record<string, unknown>),
-							},
-						},
-					}) as Tool,
-			)
+			.map((tool) => {
+				// The AWS SDK's `ToolSpecification` type doesn't yet expose the `strict` field,
+				// so we build it as a locally-typed object and cast. The field is supported by
+				// the Converse API for models that advertise structured-output capability.
+				// Normalize schema to JSON Schema draft 2020-12 compliant format.
+				// Then, when strict is enabled, strip Bedrock-incompatible constraints
+				// (numeric `minimum`/`maximum`/etc., array `maxItems`, array `minItems > 1`)
+				// that Bedrock strict mode rejects even on supported models. Stripped values
+				// are appended to the schema's description so the model still sees them as hints.
+				let inputSchemaJson = normalizeToolSchema(tool.function.parameters as Record<string, unknown>)
+				if (opts.strict) {
+					inputSchemaJson = stripBedrockStrictIncompatibleConstraints(inputSchemaJson)
+				}
+				const toolSpec: {
+					name: string
+					description?: string
+					inputSchema: { json: Record<string, unknown> }
+					strict?: boolean
+				} = {
+					name: tool.function.name,
+					description: tool.function.description,
+					inputSchema: {
+						json: inputSchemaJson,
+					},
+				}
+				if (opts.strict) {
+					toolSpec.strict = true
+				}
+				return { toolSpec } as unknown as Tool
+			})
 	}
 
 	/**
@@ -1903,6 +2021,35 @@ Please check:
 - Model ID is correct for the requested features`,
 			logLevel: "error",
 		},
+		STRUCTURED_OUTPUT_UNSUPPORTED: {
+			patterns: [
+				"does not support strict",
+				"strict is not supported",
+				"strict schema is not supported",
+				"structured output is not supported",
+				"strict tool",
+				"strict mode is not supported",
+				"strict: true",
+				"textformat is not supported",
+				"output_config is not supported",
+				"outputconfig.textformat",
+			],
+			messageTemplate: `Model {modelId} does not appear to support strict structured output. Bedrock returned: {errorMessage}. Disabling structured output for this model for 30 days; retrying without strict mode.`,
+			logLevel: "warn",
+		},
+		STRUCTURED_OUTPUT_COMPILING: {
+			patterns: [
+				"schema is being compiled",
+				"schema compilation in progress",
+				"compiling schema",
+				"compiling grammar",
+				"grammar compilation",
+				"schema is being prepared",
+				"schema compile",
+			],
+			messageTemplate: `Bedrock is compiling the tool schema for {modelId}. First-time compilation can take a few minutes. Waiting and retrying...`,
+			logLevel: "info",
+		},
 		// Default/generic error
 		GENERIC: {
 			patterns: [], // Empty patterns array means this is the default
@@ -1931,6 +2078,37 @@ Please check:
 
 		const errorMessage = error.message.toLowerCase()
 		const errorName = error.name.toLowerCase()
+		const errorMetadata = error as Error & { status?: unknown; $metadata?: { httpStatusCode?: unknown } }
+		const httpStatus =
+			typeof errorMetadata.status === "number"
+				? errorMetadata.status
+				: typeof errorMetadata.$metadata?.httpStatusCode === "number"
+					? errorMetadata.$metadata.httpStatusCode
+					: undefined
+
+		// Structured output errors are checked first so they don't get swallowed by the
+		// broad VALIDATION_ERROR / INTERNAL_SERVER_ERROR patterns. Gated by HTTP status
+		// to avoid misclassifying unrelated 4xx/5xx errors that happen to mention "schema".
+		if (httpStatus === 400 || httpStatus === undefined) {
+			const structuredUnsupported = AwsBedrockHandler.ERROR_TYPES.STRUCTURED_OUTPUT_UNSUPPORTED
+			if (
+				structuredUnsupported.patterns.some(
+					(pattern) => errorMessage.includes(pattern) || errorName.includes(pattern),
+				)
+			) {
+				return "STRUCTURED_OUTPUT_UNSUPPORTED"
+			}
+		}
+		if (httpStatus === 400 || httpStatus === 503 || httpStatus === undefined) {
+			const structuredCompiling = AwsBedrockHandler.ERROR_TYPES.STRUCTURED_OUTPUT_COMPILING
+			if (
+				structuredCompiling.patterns.some(
+					(pattern) => errorMessage.includes(pattern) || errorName.includes(pattern),
+				)
+			) {
+				return "STRUCTURED_OUTPUT_COMPILING"
+			}
+		}
 
 		// Check each error type's patterns in order of specificity (most specific first)
 		const errorTypeOrder = [
