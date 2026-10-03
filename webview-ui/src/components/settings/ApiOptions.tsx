@@ -96,6 +96,7 @@ import { ApiErrorMessage } from "./ApiErrorMessage"
 import { ThinkingBudget } from "./ThinkingBudget"
 import { Verbosity } from "./Verbosity"
 import { TodoListSettingsControl } from "./TodoListSettingsControl"
+import { ExtractInlineThinkingSettingsControl } from "./ExtractInlineThinkingSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
@@ -804,6 +805,10 @@ const ApiOptions = ({
 							<CollapsibleContent className="space-y-3">
 								<TodoListSettingsControl
 									todoListEnabled={apiConfiguration.todoListEnabled}
+									onChange={(field, value) => setApiConfigurationField(field, value)}
+								/>
+								<ExtractInlineThinkingSettingsControl
+									extractInlineThinking={apiConfiguration.extractInlineThinking}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
 								{selectedModelInfo?.supportsTemperature !== false && (

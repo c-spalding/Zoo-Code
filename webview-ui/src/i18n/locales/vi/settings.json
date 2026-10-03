@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Bật công cụ danh sách việc cần làm",
 			"description": "Khi được bật, Zoo có thể tạo và quản lý danh sách việc cần làm để theo dõi tiến độ công việc. Điều này giúp tổ chức các tác vụ phức tạp thành các bước có thể quản lý được."
+		},
+		"extractInlineThinking": {
+			"label": "Trích xuất thẻ suy nghĩ nội tuyến",
+			"description": "Khi được bật, Zoo phát hiện các thẻ <think>, <thinking> và <reasoning> trong đầu ra văn bản thuần của mô hình và hiển thị nội dung của chúng dưới dạng khối lý luận có thể thu gọn, thay vì hiển thị các thẻ thô trong phản hồi."
 		}
 	},
 	"experimental": {

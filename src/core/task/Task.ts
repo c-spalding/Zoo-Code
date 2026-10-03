@@ -111,6 +111,7 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
+import { InlineThinkingStreamParser } from "../assistant-message/InlineThinkingStreamParser"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -3271,6 +3272,71 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let assistantMessage = ""
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
+
+				// --- Inline thinking extraction (fork tranche T8) ---
+				// Read the setting once before the stream starts so the hot-path "text"
+				// handler below doesn't need an async read per chunk. this.apiConfiguration
+				// is kept in sync with the active profile (see updateApiConfiguration()), so a
+				// plain field read is safe and avoids the extra provider round-trip.
+				const inlineThinkingParser = this.apiConfiguration.extractInlineThinking
+					? new InlineThinkingStreamParser()
+					: undefined
+				// Accumulated tag-stripped text for the *current* text block only (reset to
+				// "" each time a block is finalized below), used to build the displayed text
+				// block when extraction is enabled. The raw `assistantMessage` (with tags still
+				// inline) is still what gets saved to API history below, so the model retains
+				// its own prior thinking in multi-turn context.
+				let cleanAssistantText = ""
+				const appendCleanAssistantText = (textDelta: string) => {
+					cleanAssistantText += textDelta
+					const lastBlock = this.assistantMessageContent[this.assistantMessageContent.length - 1]
+					if (lastBlock?.type === "text" && lastBlock.partial) {
+						lastBlock.content = cleanAssistantText
+					} else {
+						this.assistantMessageContent.push({
+							type: "text",
+							content: cleanAssistantText,
+							partial: true,
+						})
+						this.userMessageContentReady = false
+					}
+				}
+				// Finalizes a still-open text block the moment a thinking tag opens after it,
+				// mirroring the existing native-tool-call pattern just below ("Before adding a
+				// new tool, finalize any preceding text block"). Without this, a response that
+				// alternates text/thinking/text would leave the first text block's
+				// clineMessages entry orphaned mid-partial, and the text that resumes after the
+				// tag would be written into a brand-new clineMessages entry (because say()'s
+				// "update vs new message" check looks at the *last* clineMessage, which by then
+				// is the reasoning entry), duplicating the pre-tag text on screen. Resetting
+				// cleanAssistantText starts the next block's accumulation fresh.
+				//
+				// Unlike the native-tool-call pattern (which mutates the block and leaves it for
+				// a *later* presentAssistantMessageSafe() call to pick up, safe because nothing
+				// else lands in clineMessages in between), this must directly `await this.say(...)`
+				// rather than call presentAssistantMessageSafe(): the reasoning say() that
+				// immediately follows is itself a direct, awaited call bypassing the
+				// assistantMessageContent/presentAssistantMessage pipeline, so it lands in
+				// clineMessages right away. A deferred/queued presenter call racing behind it
+				// would instead find the reasoning entry as clineMessages' last entry, fail the
+				// "is this still the same partial message" check, and insert a *duplicate*
+				// complete text message rather than completing the original partial one.
+				// Advancing currentStreamingContentIndex past this block ourselves keeps it in
+				// sync so a later presentAssistantMessage() call (for the next streamed text or
+				// tool-use block) never re-discovers and re-presents this already-finalized block.
+				const finalizeOpenTextBlockForReasoningTransition = async () => {
+					const lastIndex = this.assistantMessageContent.length - 1
+					const lastBlock = this.assistantMessageContent[lastIndex]
+					if (lastBlock?.type === "text" && lastBlock.partial) {
+						lastBlock.partial = false
+						await this.say("text", lastBlock.content, undefined, false)
+						if (this.currentStreamingContentIndex <= lastIndex) {
+							this.currentStreamingContentIndex = lastIndex + 1
+						}
+					}
+					cleanAssistantText = ""
+				}
+
 				this.isStreaming = true
 
 				try {
@@ -3467,21 +3533,62 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							case "text": {
 								assistantMessage += chunk.text
 
-								// Native tool calling: text chunks are plain text.
-								// Create or update a text content block directly
-								const lastBlock = this.assistantMessageContent[this.assistantMessageContent.length - 1]
-								if (lastBlock?.type === "text" && lastBlock.partial) {
-									lastBlock.content = assistantMessage
+								if (!inlineThinkingParser) {
+									// Native tool calling: text chunks are plain text.
+									// Create or update a text content block directly
+									const lastBlock =
+										this.assistantMessageContent[this.assistantMessageContent.length - 1]
+									if (lastBlock?.type === "text" && lastBlock.partial) {
+										lastBlock.content = assistantMessage
+									} else {
+										this.assistantMessageContent.push({
+											type: "text",
+											content: assistantMessage,
+											partial: true,
+										})
+										this.userMessageContentReady = false
+									}
+									/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+									this.presentAssistantMessageSafe()
 								} else {
-									this.assistantMessageContent.push({
-										type: "text",
-										content: assistantMessage,
-										partial: true,
-									})
-									this.userMessageContentReady = false
+									// Inline thinking extraction enabled (fork tranche T8).
+									// Route the chunk through the streaming parser: plain-text
+									// events update the (tag-stripped) text block exactly like
+									// the branch above, while reasoning events stream through the
+									// same say("reasoning", ...) mechanism native reasoningContent
+									// uses, so both get identical collapsible-block UI treatment.
+									// Routing happens in real time (not after the stream completes)
+									// so the webview never has to overwrite already-rendered text -
+									// see fork-docs/fork-feature-inventory.md T8 defect F-TC-2.
+									//
+									// Only re-present the text block when this chunk actually produced
+									// a text event. A chunk whose content lands entirely inside an
+									// already-open thinking tag yields reasoning events only; the text
+									// block in assistantMessageContent is untouched, so re-presenting it
+									// would re-emit the same stale content via say("text", ...) after the
+									// reasoning say() has become the last clineMessage, creating a
+									// spurious duplicate partial text message instead of updating the
+									// original one in place.
+									let producedTextEvent = false
+									for (const event of inlineThinkingParser.push(chunk.text)) {
+										if (event.type === "text") {
+											appendCleanAssistantText(event.text)
+											producedTextEvent = true
+										} else {
+											// Finalize any still-open text block the moment a tag
+											// opens (idempotent -- see
+											// finalizeOpenTextBlockForReasoningTransition's doc
+											// comment above for why this must happen before the
+											// first reasoning say() of each tag occurrence).
+											await finalizeOpenTextBlockForReasoningTransition()
+											await this.say("reasoning", event.text, undefined, event.partial)
+										}
+									}
+									if (producedTextEvent) {
+										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+										this.presentAssistantMessageSafe()
+									}
 								}
-								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-								this.presentAssistantMessageSafe()
 								break
 							}
 						}
@@ -3847,14 +3954,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				// No legacy streaming parser to finalize.
 
+				// Finalize any inline-thinking state left open at stream end (fork tranche
+				// T8): an unclosed tag is flushed as a final, non-partial reasoning say();
+				// buffered text that turned out not to be the start of a tag is flushed into
+				// the (tag-stripped) text block. See InlineThinkingStreamParser.flush().
+				if (inlineThinkingParser) {
+					for (const event of inlineThinkingParser.flush()) {
+						if (event.type === "text") {
+							appendCleanAssistantText(event.text)
+						} else {
+							// See the finalizeOpenTextBlockForReasoningTransition doc comment
+							// above: an unclosed tag can still have an earlier, still-open text
+							// block (e.g. "intro text<think>unterminated") that must be
+							// finalized before this reasoning say(), same as the in-stream path.
+							await finalizeOpenTextBlockForReasoningTransition()
+							await this.say("reasoning", event.text, undefined, event.partial)
+						}
+					}
+				}
+
 				// Note: updateApiReqMsg() is now called from within drainStreamInBackgroundToFindAllUsage
 				// to ensure usage data is captured even when the stream is interrupted. The background task
 				// uses local variables to accumulate usage data before atomically updating the shared state.
 
-				// Complete the reasoning message if it exists
-				// We can't use say() here because the reasoning message may not be the last message
-				// (other messages like text blocks or tool uses may have been added after it during streaming)
-				if (reasoningMessage) {
+				// Complete any partial reasoning message (native reasoningContent or
+				// inline-thinking extraction - both stream through say("reasoning", ...)).
+				// We can't use say() here because the reasoning message may not be the last
+				// message (other messages like text blocks or tool uses may have been added
+				// after it during streaming). Unconditional: the inner check is self-guarding,
+				// and inline-thinking-only runs (no native reasoningMessage) still need this.
+				{
 					const lastReasoningIndex = findLastIndex(
 						this.clineMessages,
 						(m) => m.type === "say" && m.say === "reasoning",

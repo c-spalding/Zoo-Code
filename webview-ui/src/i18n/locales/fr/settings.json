@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Activer l'outil de liste de tâches",
 			"description": "Lorsqu'activé, Zoo peut créer et gérer des listes de tâches pour suivre la progression. Cela aide à organiser les tâches complexes en étapes gérables."
+		},
+		"extractInlineThinking": {
+			"label": "Extraire les balises de pensée en ligne",
+			"description": "Lorsqu'activé, Zoo détecte les balises <think>, <thinking> et <reasoning> dans la sortie en texte brut d'un modèle et affiche leur contenu comme un bloc de raisonnement repliable, au lieu d'afficher les balises brutes dans la réponse."
 		}
 	},
 	"experimental": {

@@ -174,6 +174,22 @@ vi.mock("../TodoListSettingsControl", () => ({
 	),
 }))
 
+// Mock ExtractInlineThinkingSettingsControl for tests
+vi.mock("../ExtractInlineThinkingSettingsControl", () => ({
+	ExtractInlineThinkingSettingsControl: ({ extractInlineThinking, onChange }: any) => (
+		<div data-testid="extract-inline-thinking-settings-control">
+			<label>
+				Extract inline thinking tags
+				<input
+					type="checkbox"
+					checked={extractInlineThinking}
+					onChange={(e) => onChange("extractInlineThinking", e.target.checked)}
+				/>
+			</label>
+		</div>
+	),
+}))
+
 // Mock ThinkingBudget component
 vi.mock("../ThinkingBudget", () => ({
 	ThinkingBudget: ({ modelInfo, apiConfiguration, setApiConfigurationField }: any) => {

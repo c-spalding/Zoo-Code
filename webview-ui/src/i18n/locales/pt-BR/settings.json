@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Habilitar ferramenta de lista de tarefas",
 			"description": "Quando habilitado, o Zoo pode criar e gerenciar listas de tarefas para acompanhar o progresso das tarefas. Isso ajuda a organizar tarefas complexas em etapas gerenciáveis."
+		},
+		"extractInlineThinking": {
+			"label": "Extrair tags de pensamento inline",
+			"description": "Quando habilitado, o Zoo detecta tags <think>, <thinking> e <reasoning> na saída de texto simples de um modelo e exibe seu conteúdo como um bloco de raciocínio recolhível, em vez de mostrar as tags brutas na resposta."
 		}
 	},
 	"experimental": {

@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Włącz narzędzie listy zadań",
 			"description": "Po włączeniu Zoo może tworzyć i zarządzać listami zadań do śledzenia postępu zadań. Pomaga to organizować złożone zadania w łatwe do zarządzania kroki."
+		},
+		"extractInlineThinking": {
+			"label": "Wyodrębnij znaczniki myślenia w tekście",
+			"description": "Po włączeniu Zoo wykrywa znaczniki <think>, <thinking> i <reasoning> w tekście odpowiedzi modelu i wyświetla ich treść jako zwijany blok rozumowania, zamiast pokazywać surowe znaczniki w odpowiedzi."
 		}
 	},
 	"experimental": {

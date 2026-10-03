@@ -696,6 +696,133 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("inline thinking extraction (fork tranche T8)", () => {
+		async function createInlineThinkingTask(apiConfigOverrides: Partial<ProviderSettings> = {}) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, ...apiConfigOverrides },
+				task: "inline thinking test",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			return task
+		}
+
+		function textChunks(...texts: string[]): ApiStreamChunk[] {
+			return texts.map((text) => ({ type: "text", text }))
+		}
+
+		// Text-only responses (no tool use) make recursivelyMakeClineRequests push a
+		// synthetic "no tools used" follow-up and loop again. These tests only care
+		// about the first assistant turn, so the second (and any later) attemptApiRequest
+		// call throws immediately - mirroring the "empty-response retries" describe
+		// block's established stop-after-first-request pattern - rather than resolving
+		// true/false, which `recursivelyMakeClineRequests`'s outer catch turns into a
+		// clean `return true` instead of letting the stack loop run indefinitely.
+		function mockSingleAttemptApiRequest(task: Task, chunks: ApiStreamChunk[]) {
+			return vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>(chunks))
+				.mockImplementation(() => {
+					throw new Error("stop after first inline-thinking request (test helper)")
+				})
+		}
+
+		it("streams a <think> tag into a reasoning say() message, finalizing surrounding text blocks in order without duplication", async () => {
+			const task = await createInlineThinkingTask({ extractInlineThinking: true })
+
+			// Split so the opening tag lands exactly at a chunk boundary and the closing
+			// tag starts a chunk - the two chunk-boundary cases the archive's own bug
+			// fixes were about preserving, now exercised through the Task.ts wiring.
+			mockSingleAttemptApiRequest(
+				task,
+				textChunks("Before text. <think>", "step one. step two.", "</think> After text."),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const textSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "text")
+			const reasoningSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+
+			// Exactly one text message either side of the tag - the regression test for
+			// the text->thinking->text duplicate-display bug: an ever-cumulative
+			// cleanAssistantText would either leave the first text block orphaned
+			// mid-partial or spawn a second clineMessages entry for it instead of
+			// resuming/finalizing the original.
+			expect(textSays).toHaveLength(2)
+			expect(textSays[0]).toMatchObject({ text: "Before text. ", partial: false })
+			expect(textSays[1]).toMatchObject({ text: " After text.", partial: false })
+
+			// Ordering: the reasoning say() lands between the two text says, matching
+			// real-time extraction (not post-hoc stripping after the stream completes).
+			expect(reasoningSays).toHaveLength(1)
+			expect(reasoningSays[0]).toMatchObject({ text: "step one. step two.", partial: false })
+
+			const textIndex0 = task.clineMessages.indexOf(textSays[0])
+			const reasoningIndex = task.clineMessages.indexOf(reasoningSays[0])
+			const textIndex1 = task.clineMessages.indexOf(textSays[1])
+			expect(textIndex0).toBeLessThan(reasoningIndex)
+			expect(reasoningIndex).toBeLessThan(textIndex1)
+
+			// No-duplicate-display: neither displayed text message retains raw tag markup.
+			for (const message of textSays) {
+				expect(message.text).not.toContain("<think>")
+				expect(message.text).not.toContain("</think>")
+			}
+
+			// The raw, tag-inclusive text is still what's saved to API history, so the
+			// model retains its own prior thinking in multi-turn context.
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toEqual([
+				{
+					type: "text",
+					text: "Before text. <think>step one. step two.</think> After text.",
+				},
+			])
+		})
+
+		it("finalizes an unclosed tag at stream end as a complete (non-partial) reasoning message", async () => {
+			const task = await createInlineThinkingTask({ extractInlineThinking: true })
+
+			mockSingleAttemptApiRequest(task, textChunks("Intro <think>unterminated reasoning"))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const textSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "text")
+			const reasoningSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+
+			expect(textSays).toHaveLength(1)
+			expect(textSays[0].text).toBe("Intro ")
+
+			// flush() must finalize an unclosed tag as non-partial - the UI must never be
+			// left displaying a reasoning block stuck in a perpetually "thinking" state
+			// just because the model's stream ended mid-tag.
+			expect(reasoningSays).toHaveLength(1)
+			expect(reasoningSays[0]).toMatchObject({ text: "unterminated reasoning", partial: false })
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toEqual([
+				{ type: "text", text: "Intro <think>unterminated reasoning" },
+			])
+		})
+
+		it("leaves raw tag markup in the displayed text and emits no reasoning say() when the setting is off", async () => {
+			const task = await createInlineThinkingTask({ extractInlineThinking: false })
+
+			mockSingleAttemptApiRequest(task, textChunks("Hello <think>raw</think> World"))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const textSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "text")
+			const reasoningSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+
+			expect(reasoningSays).toHaveLength(0)
+			expect(textSays).toHaveLength(1)
+			expect(textSays[0].text).toBe("Hello <think>raw</think> World")
+		})
+	})
+
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",

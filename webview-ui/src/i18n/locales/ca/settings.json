@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Habilitar eina de llista de tasques",
 			"description": "Quan està habilitat, Zoo pot crear i gestionar llistes de tasques per fer el seguiment del progrés de les tasques. Això ajuda a organitzar tasques complexes en passos manejables."
+		},
+		"extractInlineThinking": {
+			"label": "Extreu etiquetes de pensament en línia",
+			"description": "Quan està activat, Zoo detecta les etiquetes <think>, <thinking> i <reasoning> a la sortida de text pla d'un model i mostra el seu contingut com un bloc de raonament plegable, en lloc de mostrar les etiquetes en brut a la resposta."
 		}
 	},
 	"experimental": {

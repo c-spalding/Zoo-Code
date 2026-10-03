@@ -1022,6 +1022,10 @@
 		"todoList": {
 			"label": "Enable todo list tool",
 			"description": "When enabled, Zoo can create and manage todo lists to track task progress. This helps organize complex tasks into manageable steps."
+		},
+		"extractInlineThinking": {
+			"label": "Extract inline thinking tags",
+			"description": "When enabled, Zoo detects <think>, <thinking>, and <reasoning> tags in a model's plain-text output and displays their contents as a collapsible reasoning block, instead of showing the raw tags in the response."
 		}
 	},
 	"experimental": {

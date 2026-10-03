@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "ToDoリストツールを有効にする",
 			"description": "有効にすると、Zooはタスクの進捗を追跡するためのToDoリストを作成・管理できます。これにより、複雑なタスクを管理しやすいステップに整理できます。"
+		},
+		"extractInlineThinking": {
+			"label": "インラインシンキングタグを抽出",
+			"description": "有効にすると、Zooはモデルのプレーンテキスト出力内の<think>、<thinking>、<reasoning>タグを検出し、応答内に生のタグを表示する代わりに、その内容を折りたたみ可能な推論ブロックとして表示します。"
 		}
 	},
 	"experimental": {

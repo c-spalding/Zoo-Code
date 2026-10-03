@@ -913,6 +913,10 @@
 		"todoList": {
 			"label": "Takenlijst-tool inschakelen",
 			"description": "Wanneer ingeschakeld, kan Zoo takenlijsten maken en beheren om de voortgang van taken bij te houden. Dit helpt complexe taken te organiseren in beheersbare stappen."
+		},
+		"extractInlineThinking": {
+			"label": "Inline denk-tags extraheren",
+			"description": "Wanneer ingeschakeld, detecteert Zoo <think>-, <thinking>- en <reasoning>-tags in de platte tekstuitvoer van een model en toont de inhoud als een inklapbaar redeneringsblok, in plaats van de ruwe tags in het antwoord te tonen."
 		}
 	},
 	"experimental": {
