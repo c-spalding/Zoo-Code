@@ -107,6 +107,10 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 			// the "Show System Prompt" preview silently drifts from what the model
 			// actually receives.
 			profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
+			// Mirrors Task.getSystemPrompt (fork tranche T9): without this, the
+			// preview would omit the XML tool-call fallback instructions even when
+			// the active profile has textToolCallFallback enabled.
+			textToolCallFallback: apiConfiguration?.textToolCallFallback,
 		},
 		undefined, // todoList
 		undefined, // modelId

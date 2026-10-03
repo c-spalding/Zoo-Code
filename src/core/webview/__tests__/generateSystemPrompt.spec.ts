@@ -464,6 +464,56 @@ describe("generateSystemPrompt preview parity", () => {
 		)
 	})
 
+	it("threads the active profile's textToolCallFallback into the TOOL USE section identically to the direct SYSTEM_PROMPT call", async () => {
+		// Fork tranche T9, defect F-AI-3: generateSystemPrompt previously omitted
+		// textToolCallFallback entirely, so the preview silently diverged from
+		// what the model actually received whenever a profile had the setting
+		// enabled. This asserts both paths render the SAME TOOL USE section.
+		getStateMock.mockResolvedValueOnce({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+				textToolCallFallback: true,
+			},
+			customModePrompts: undefined,
+			customInstructions: undefined,
+			mcpEnabled: false,
+			experiments: {},
+			language: undefined,
+			enableSubfolderRules: false,
+			disabledTools: undefined,
+		})
+
+		const preview = await generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+
+		const direct = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			"code",
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			{}, // experiments
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			{ ...fullSettings, textToolCallFallback: true }, // settings
+			undefined, // todoList
+			undefined, // modelId
+			undefined, // skillsManager
+			undefined, // disabledTools
+			fullModelInfo, // modelInfo
+		)
+
+		expect(extractSection(preview, "TOOL USE")).toEqual(extractSection(direct, "TOOL USE"))
+		// Both must actually contain the fallback sentence, not merely agree
+		// while both omit it (which would pass trivially).
+		expect(preview).toContain("If you do not have native function-calling capability")
+		expect(direct).toContain("If you do not have native function-calling capability")
+	})
+
 	describe("preview metadata-fetch robustness", () => {
 		it("skips the metadata fetch silently when the handler has no ensureModelFetched", async () => {
 			// Providers without lazy model discovery legitimately lack

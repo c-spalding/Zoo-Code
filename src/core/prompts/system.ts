@@ -106,7 +106,7 @@ async function generatePrompt(
 
 ${markdownFormattingSection()}
 
-${getSharedToolUseSection()}${toolsCatalog}
+${getSharedToolUseSection({ textToolCallFallback: settings?.textToolCallFallback })}${toolsCatalog}
 
 	${getToolUseGuidelinesSection(policy)}
 
