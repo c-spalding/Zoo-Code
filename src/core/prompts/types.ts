@@ -22,4 +22,12 @@ export interface SystemPromptSettings {
 	 * section's output is unchanged from its default wording.
 	 */
 	textToolCallFallback?: boolean
+	/**
+	 * When true, the TOOL USE section's closing sentence tells the model it may
+	 * respond with text alone when it only needs to communicate, rather than
+	 * requiring a tool call every turn (see provider-settings
+	 * `allowTextOnlyResponses`). When false/undefined, the section's output is
+	 * unchanged from its default wording.
+	 */
+	allowTextOnlyResponses?: boolean
 }

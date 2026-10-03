@@ -111,6 +111,10 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 			// preview would omit the XML tool-call fallback instructions even when
 			// the active profile has textToolCallFallback enabled.
 			textToolCallFallback: apiConfiguration?.textToolCallFallback,
+			// Mirrors Task.getSystemPrompt (fork tranche T10): without this, the
+			// preview would omit the relaxed closing sentence even when the active
+			// profile has allowTextOnlyResponses enabled.
+			allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 		},
 		undefined, // todoList
 		undefined, // modelId

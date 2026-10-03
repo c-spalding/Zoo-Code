@@ -4632,6 +4632,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// "Show System Prompt" never drifts from what the model actually
 					// receives (see fork-docs/fork-feature-inventory.md T9 defect F-AI-3).
 					textToolCallFallback: apiConfiguration?.textToolCallFallback,
+					// Fork tranche T10: mirrors the preview path (generateSystemPrompt.ts) so
+					// the TOOL USE section's closing sentence matches what the model
+					// actually receives when allowTextOnlyResponses is enabled.
+					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 				},
 				undefined, // todoList
 				this.api.getModel().id,
