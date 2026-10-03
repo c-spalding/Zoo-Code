@@ -75,6 +75,10 @@ import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
+import {
+	isUnsupported as isBedrockStructuredOutputUnsupported,
+	markUnsupported as markBedrockStructuredOutputUnsupported,
+} from "../../shared/bedrock-structured-output-cache"
 
 // services
 import { McpHub } from "../../services/mcp/McpHub"
@@ -1920,6 +1924,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...this.getBedrockStructuredOutputAccessors(),
 			...(this.currentRequestAbortController?.signal
 				? {
 						abortSignal: this.currentRequestAbortController.signal,
@@ -4387,6 +4392,38 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.api.getModel().info
 	}
 
+	/**
+	 * Bedrock-specific accessor pair backed by the hidden `bedrockStructuredOutputUnsupported`
+	 * global setting (a per-model 30-day rejection cache). Spread into
+	 * `ApiHandlerCreateMessageMetadata` at each createMessage call site so AwsBedrockHandler can
+	 * skip strict structured output for models it has already seen reject it, and record new
+	 * rejections as they occur.
+	 */
+	private getBedrockStructuredOutputAccessors(): Pick<
+		ApiHandlerCreateMessageMetadata,
+		"isModelStructuredOutputUnsupported" | "markModelStructuredOutputUnsupported"
+	> {
+		return {
+			isModelStructuredOutputUnsupported: (modelId: string) => {
+				const proxy = this.providerRef.deref()?.contextProxy
+				if (!proxy) return false
+				return isBedrockStructuredOutputUnsupported(
+					proxy.getValue("bedrockStructuredOutputUnsupported"),
+					modelId,
+				)
+			},
+			markModelStructuredOutputUnsupported: (modelId: string) => {
+				const proxy = this.providerRef.deref()?.contextProxy
+				if (!proxy) return
+				const current = proxy.getValue("bedrockStructuredOutputUnsupported")
+				void proxy.setValue(
+					"bedrockStructuredOutputUnsupported",
+					markBedrockStructuredOutputUnsupported(current, modelId),
+				)
+			},
+		}
+	}
+
 	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -4446,6 +4483,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...this.getBedrockStructuredOutputAccessors(),
 			...(this.currentRequestAbortController?.signal
 				? {
 						abortSignal: this.currentRequestAbortController.signal,
@@ -4696,6 +4734,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
 				mode,
 				taskId: this.taskId,
+				...this.getBedrockStructuredOutputAccessors(),
 				...(this.currentRequestAbortController?.signal
 					? {
 							abortSignal: this.currentRequestAbortController.signal,
@@ -4875,6 +4914,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
+			...this.getBedrockStructuredOutputAccessors(),
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
 			abortSignal,
 			// Include tools whenever they are present.
