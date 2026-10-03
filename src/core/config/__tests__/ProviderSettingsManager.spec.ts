@@ -102,6 +102,7 @@ describe("ProviderSettingsManager", () => {
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: true,
 					},
 				}),
 			)
@@ -258,6 +259,89 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.test.todoListEnabled).toEqual(true)
 			expect(storedConfig.apiConfigs.existing.todoListEnabled).toEqual(false)
 			expect(storedConfig.migrations.todoListEnabledMigrated).toEqual(true)
+		})
+
+		it("should rename the legacy per-profile customInstructions key to profileCustomInstructions if it has not done so already", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+							customInstructions: "Legacy profile text",
+						},
+						test: {
+							apiProvider: providerIdentifiers.anthropic,
+							// Already migrated: no legacy key, keep as-is.
+							profileCustomInstructions: "Already on new key",
+						},
+						both: {
+							apiProvider: providerIdentifiers.anthropic,
+							// Both keys present with a non-empty new value: new value wins,
+							// legacy key is dropped without overwriting.
+							customInstructions: "Legacy value that should be dropped",
+							profileCustomInstructions: "Existing value wins",
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			// Get the last call to store, which should contain the migrated config
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			expect(storedConfig.apiConfigs.default.profileCustomInstructions).toEqual("Legacy profile text")
+			expect(storedConfig.apiConfigs.default.customInstructions).toBeUndefined()
+
+			expect(storedConfig.apiConfigs.test.profileCustomInstructions).toEqual("Already on new key")
+
+			expect(storedConfig.apiConfigs.both.profileCustomInstructions).toEqual("Existing value wins")
+			expect(storedConfig.apiConfigs.both.customInstructions).toBeUndefined()
+
+			expect(storedConfig.migrations.profileCustomInstructionsMigrated).toEqual(true)
+		})
+
+		it("should not re-run the profileCustomInstructions rename once migrated", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+							profileCustomInstructions: "Stable value",
+						},
+					},
+					modeApiConfigs: {},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+						profileCustomInstructionsMigrated: true,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			// Already migrated and no other migration is due, so nothing should be
+			// written to storage.
+			expect(mockSecrets.store).not.toHaveBeenCalled()
 		})
 
 		it("should migrate legacy Roo provider profiles into a setup-needed fallback", async () => {
@@ -1052,6 +1136,37 @@ describe("ProviderSettingsManager", () => {
 
 			expect(exported.apiConfigs.anthropic.modelMaxTokens).toBeUndefined()
 			expect(exported.apiConfigs.anthropic.modelMaxThinkingTokens).toBeUndefined()
+		})
+
+		it("should preserve profileCustomInstructions through an export/import round trip", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						id: "default-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-3-5-haiku-20241022",
+						profileCustomInstructions: "Be extra concise for this profile.",
+					},
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const exported = await providerSettingsManager.export()
+			expect(exported.apiConfigs.default.profileCustomInstructions).toBe("Be extra concise for this profile.")
+
+			// Round-trip: importing the exported profiles should persist the field
+			// as-is, and a subsequent load should surface the same value.
+			await providerSettingsManager.import(exported)
+
+			const storeCalls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(storeCalls[storeCalls.length - 1][1])
+			expect(storedConfig.apiConfigs.default.profileCustomInstructions).toBe("Be extra concise for this profile.")
+
+			mockSecrets.get.mockResolvedValue(storeCalls[storeCalls.length - 1][1])
+			const profile = await providerSettingsManager.getProfile({ name: "default" })
+			expect(profile.profileCustomInstructions).toBe("Be extra concise for this profile.")
 		})
 	})
 

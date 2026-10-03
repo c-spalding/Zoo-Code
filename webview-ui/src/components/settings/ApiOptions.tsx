@@ -886,6 +886,27 @@ const ApiOptions = ({
 					)}
 				</>
 			)}
+
+			{/*
+			 * Per-profile custom instructions, appended to the system prompt when this
+			 * profile is active (see provider-settings `profileCustomInstructions`).
+			 * Deliberately rendered once, at the top level here -- NOT inside any
+			 * provider-specific branch or the Advanced Settings collapsible above --
+			 * so it cannot be duplicated by a future provider-specific insertion.
+			 */}
+			<div>
+				<label className="block font-medium mb-1">{t("settings:providers.profileCustomInstructions")}</label>
+				<textarea
+					value={apiConfiguration?.profileCustomInstructions || ""}
+					onChange={(e) => setApiConfigurationField("profileCustomInstructions", e.target.value || undefined)}
+					placeholder={t("settings:providers.profileCustomInstructionsPlaceholder")}
+					className="w-full min-h-[80px] p-2 rounded border border-vscode-input-border bg-vscode-input-background text-vscode-input-foreground text-sm font-mono resize-y"
+					rows={4}
+				/>
+				<div className="text-sm text-vscode-descriptionForeground mt-1">
+					{t("settings:providers.profileCustomInstructionsDesc")}
+				</div>
+			</div>
 		</div>
 	)
 }

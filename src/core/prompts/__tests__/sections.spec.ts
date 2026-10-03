@@ -12,6 +12,7 @@ import type { CodeIndexManager } from "../../../services/code-index/manager"
 import type { SkillsManager } from "../../../services/skills/SkillsManager"
 import type { SkillMetadata } from "../../../shared/skills"
 import * as shellUtils from "../../../utils/shell"
+import type { SystemPromptSettings } from "../types"
 
 // Mock os-name so getSystemInfoSection never spawns PowerShell on Windows (cold
 // launches can exceed the CI test timeout). Matches the form used in
@@ -96,6 +97,97 @@ describe("addCustomInstructions", () => {
 
 		expect(result).not.toContain("Language Preference:")
 		expect(result).not.toContain("You should always speak and think in")
+	})
+
+	describe("profile instructions", () => {
+		it("renders a Profile Instructions section when settings.profileCustomInstructions is set", async () => {
+			const result = await addCustomInstructions("", "", "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: "Be extra concise." } as SystemPromptSettings,
+			})
+
+			expect(result).toContain("Profile Instructions:")
+			expect(result).toContain("Be extra concise.")
+		})
+
+		it.each([
+			["undefined", undefined],
+			["empty string", ""],
+			["whitespace only", "   \n\t  "],
+		])(
+			"omits the Profile Instructions section when settings.profileCustomInstructions is %s",
+			async (_case, value) => {
+				const result = await addCustomInstructions("", "", "/test/path", "test-mode", {
+					settings: { profileCustomInstructions: value } as SystemPromptSettings,
+				})
+
+				expect(result).not.toContain("Profile Instructions:")
+			},
+		)
+
+		it("omits the Profile Instructions section when settings is undefined", async () => {
+			const result = await addCustomInstructions("", "", "/test/path", "test-mode")
+
+			expect(result).not.toContain("Profile Instructions:")
+		})
+
+		it("trims surrounding whitespace from profile instructions", async () => {
+			const result = await addCustomInstructions("", "", "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: "  Trim me.  " } as SystemPromptSettings,
+			})
+
+			expect(result).toContain("Profile Instructions:\nTrim me.")
+		})
+
+		it("orders Global before Profile before Mode-specific when all three are present", async () => {
+			const result = await addCustomInstructions("Mode text", "Global text", "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: "Profile text" } as SystemPromptSettings,
+			})
+
+			const globalIndex = result.indexOf("Global Instructions:")
+			const profileIndex = result.indexOf("Profile Instructions:")
+			const modeIndex = result.indexOf("Mode-specific Instructions:")
+
+			expect(globalIndex).toBeGreaterThan(-1)
+			expect(profileIndex).toBeGreaterThan(-1)
+			expect(modeIndex).toBeGreaterThan(-1)
+			expect(globalIndex).toBeLessThan(profileIndex)
+			expect(profileIndex).toBeLessThan(modeIndex)
+		})
+
+		it("orders Profile before Mode-specific when global is absent", async () => {
+			const result = await addCustomInstructions("Mode text", "", "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: "Profile text" } as SystemPromptSettings,
+			})
+
+			expect(result).not.toContain("Global Instructions:")
+			const profileIndex = result.indexOf("Profile Instructions:")
+			const modeIndex = result.indexOf("Mode-specific Instructions:")
+			expect(profileIndex).toBeGreaterThan(-1)
+			expect(modeIndex).toBeGreaterThan(-1)
+			expect(profileIndex).toBeLessThan(modeIndex)
+		})
+
+		it("does not duplicate text that appears in both global and profile instructions", async () => {
+			const sharedText = "Shared instruction text"
+			const result = await addCustomInstructions("", sharedText, "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: sharedText } as SystemPromptSettings,
+			})
+
+			const occurrences = result.split(sharedText).length - 1
+			expect(occurrences).toBe(2) // once under Global, once under Profile -- never collapsed/deduped, never tripled
+			expect(result).toContain(`Global Instructions:\n${sharedText}`)
+			expect(result).toContain(`Profile Instructions:\n${sharedText}`)
+		})
+
+		it("renders only Profile Instructions when global and mode-specific are both absent", async () => {
+			const result = await addCustomInstructions("", "", "/test/path", "test-mode", {
+				settings: { profileCustomInstructions: "Solo profile text" } as SystemPromptSettings,
+			})
+
+			expect(result).not.toContain("Global Instructions:")
+			expect(result).not.toContain("Mode-specific Instructions:")
+			expect(result).toContain("Profile Instructions:\nSolo profile text")
+		})
 	})
 })
 
