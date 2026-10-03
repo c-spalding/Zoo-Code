@@ -41,7 +41,7 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
 | 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | **MERGED** -- ABSENT, clean re-application; migration logic re-diffed and re-anchored per corrected section 8                            | none mandatory                        |
 | 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | **MERGED** -- ABSENT, clean re-application; parser extracted into its own tested module per F-ER-2/F-TC-2 (see corrected section 9)      | none mandatory                        |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                               | F-AI-2, F-AI-3                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | **MERGED** -- ABSENT, entangled with `tool-use.ts` shape, reconciled per the Option C design (see corrected section 10)                  | F-AI-2, F-AI-3 (both resolved)        |
 | 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                        | F-LC-1                                |
 | 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                      | none mandatory                        |
 | 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                           | none mandatory                        |
@@ -921,6 +921,72 @@ than re-implemented, resolving F-DC-1 at T9 integration time.
 
 **Order:** 8th (branch `fork/09-text-tool-fallback`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-03). Four commits on
+`fork/09-text-tool-fallback` -- `46039fd3a` (extractor module: `TextToolCallExtractor.ts`
+
+- 49-test spec, importing T8's shared `THINKING_TAG_REGEX` from `thinking-tags.ts` per
+  the F-DC-1 deferral noted in T8's section), `5f4c2fddc` (`textToolCallFallback` schema
+  field + `getSharedToolUseSection(options?)` optional-options-param rework + `system.ts`/
+  `types.ts` threading + `generateSystemPrompt.ts` preview-parity fix, resolving F-AI-2 and
+  F-AI-3 together since both live in the same wiring path), `759cf1b6a` (`Task.ts`
+  `applyTextToolCallFallback` private method + integration tests), `230912572` (webview
+  checkbox + full i18n parity across all 18 locales) -- merged via `--no-ff` as `94cef51d9`.
+
+**Design decision (resolves the recon's "largest structural-rework item"):** rather than
+threading `textToolCallFallback` as a positional parameter into
+`getSharedToolUseSection`, BASE's zero-argument, 5-line function was extended with a
+single **optional options object** (`SharedToolUseSectionOptions`), and the fallback
+sentence is _appended_ to the existing sentence rather than branching the whole string.
+This is "Option C -- alongside the policy": the function's off-state (`options`
+undefined or `textToolCallFallback` false) renders byte-for-byte identical to BASE's
+original output, which is what let F-AI-2's 7 broken snapshots be resolved by _not_
+changing the base sentence at all, rather than by regenerating snapshots to match new
+wording. `effective-tool-policy.ts` was deliberately **never touched** --
+`textToolCallFallback` is threaded as a sibling parameter alongside the policy wherever
+needed (`Task.ts`'s `applyTextToolCallFallback`, `system.ts`), and the extractor's
+security allowlist is always `policy.tools` (the same `ReadonlySet<string>`
+`resolveEffectiveToolPolicy` computes for the request), never an independently
+re-derived list -- so a model can never have a text-expressed tool call extracted for a
+tool it was not actually offered that turn.
+
+**F-AI-2 resolved without snapshot regeneration:** because the off-state is
+byte-identical, none of the 7 pre-existing snapshot/assertion tests in
+`system-prompt.spec.ts` or `add-custom-instructions.spec.ts` needed any change -- they
+were never broken by this re-application in the first place, since BASE's base sentence
+was left untouched rather than replaced with new branching wording. A dedicated new test
+block in `tool-use.spec.ts` ("`textToolCallFallback` flag") asserts the off-state is
+unchanged and the on-state appends (not replaces) the fallback instruction.
+
+**F-AI-3 resolved:** `generateSystemPrompt.ts` now reads
+`apiConfiguration?.textToolCallFallback` and threads it into the same
+`SharedToolUseSectionOptions` the runtime `Task.ts` path uses, with a regression test
+(`generateSystemPrompt.spec.ts`) asserting both code paths produce identical TOOL USE
+section output for representative on/off configurations.
+
+**F-ER-1/F-M-1 resolved:** the post-stream fallback logic was extracted into its own
+private method, `Task.applyTextToolCallFallback()` (~105 LOC, heavily commented),
+rather than inlined into `recursivelyMakeClineRequests`. The call site there is a single
+`if (!didToolUse) { ... }` guard block (~20 lines) that invokes the method and, on a
+successful extraction, re-runs the same `presentAssistantMessageSafe()` /
+`pWaitFor(() => this.userMessageContentReady ...)` sequence the native-tool-call path
+uses, so the two paths share identical downstream handling.
+
+**F-ER-3/F-BP-4 resolved:** synthetic tool-call IDs use
+`` `text-extract-${crypto.randomUUID().slice(0, 8)}` ``, with an inline comment
+explaining the truncation mirrors `this.instanceId`'s own
+`crypto.randomUUID().slice(0, 8)` convention from the constructor, and that the 8-hex-
+char suffix only needs to be unique within a single turn's own tool_use blocks.
+
+**F-BP-2 (dynamic imports) resolved by construction:** `TextToolCallExtractor` and
+`NativeToolCallParser` are both static top-of-file imports in `Task.ts` (alongside the
+pre-existing `resolveEffectiveToolPolicy` and `buildNativeToolsArrayWithRestrictions`
+imports) -- no `await import(...)` was introduced by this tranche, so there was no
+circular-import rationale to document.
+
+**F-DC-1 resolved:** `TextToolCallExtractor.ts` imports `THINKING_TAG_REGEX` from T8's
+`src/core/assistant-message/thinking-tags.ts` rather than redefining an equivalent regex,
+exactly as T8's section anticipated.
+
 ### Purpose
 
 Parses XML, Anthropic `<invoke>`-style, and JSON-in-fenced-code tool calls out of a
@@ -935,16 +1001,27 @@ drive the full tool-use loop.
 
 ### Principal files
 
-| File                                                                                                                                       | New/Modified                                                                                                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| [`src/core/assistant-message/TextToolCallExtractor.ts`](src/core/assistant-message/TextToolCallExtractor.ts)                               | New                                                                                                                            |
-| [`src/core/assistant-message/__tests__/TextToolCallExtractor.spec.ts`](src/core/assistant-message/__tests__/TextToolCallExtractor.spec.ts) | New -- 52 tests                                                                                                                |
-| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                                                           | Modified -- post-stream fallback loop (~150 LOC)                                                                               |
-| [`src/core/prompts/sections/tool-use.ts`](src/core/prompts/sections/tool-use.ts)                                                           | Modified -- `textToolCallFallback`/`allowTextOnlyResponses` flags -- **this is the file that broke 7 existing snapshot tests** |
-| [`src/core/prompts/system.ts`](src/core/prompts/system.ts), [`src/core/prompts/types.ts`](src/core/prompts/types.ts)                       | Modified                                                                                                                       |
-| [`src/core/webview/generateSystemPrompt.ts`](src/core/webview/generateSystemPrompt.ts)                                                     | Modified -- must also pass `textToolCallFallback` (see F-AI-3)                                                                 |
-| [`packages/types/src/provider-settings.ts`](packages/types/src/provider-settings.ts)                                                       | Modified -- field                                                                                                              |
-| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)                                   | Modified -- checkbox                                                                                                           |
+Actual files touched at the re-anchoring point (differs from the recon's estimate in two
+ways: `provider-settings.ts` has moved to `provider-settings/common.ts`, and the
+`tool-use.ts`/`system.ts`/`types.ts` diff is smaller than estimated because of the
+optional-options-object design):
+
+| File                                                                                                                                                                                     | New/Modified                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [`src/core/assistant-message/TextToolCallExtractor.ts`](src/core/assistant-message/TextToolCallExtractor.ts)                                                                             | New -- imports `THINKING_TAG_REGEX` from T8's `thinking-tags.ts` (F-DC-1)                                |
+| [`src/core/assistant-message/__tests__/TextToolCallExtractor.spec.ts`](src/core/assistant-message/__tests__/TextToolCallExtractor.spec.ts)                                               | New -- 49 tests (thinking-tag extraction, XML/invoke/JSON formats, allowlist rejection, edge cases)      |
+| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                                                                                                         | Modified -- `applyTextToolCallFallback()` private method (~105 LOC) + call-site guard                    |
+| [`src/core/task/__tests__/Task.spec.ts`](src/core/task/__tests__/Task.spec.ts)                                                                                                           | Modified -- `describe("text tool-call fallback (fork tranche T9)")`, 7 integration tests                 |
+| [`src/core/prompts/sections/tool-use.ts`](src/core/prompts/sections/tool-use.ts)                                                                                                         | Modified -- `SharedToolUseSectionOptions` optional-options param, off-state byte-identical               |
+| [`src/core/prompts/sections/__tests__/tool-use.spec.ts`](src/core/prompts/sections/__tests__/tool-use.spec.ts)                                                                           | Modified -- off-state/on-state parity tests (F-AI-2)                                                     |
+| [`src/core/prompts/system.ts`](src/core/prompts/system.ts), [`src/core/prompts/types.ts`](src/core/prompts/types.ts)                                                                     | Modified -- thread `textToolCallFallback` through `SystemPromptSettings` into `getSharedToolUseSection`  |
+| [`src/core/webview/generateSystemPrompt.ts`](src/core/webview/generateSystemPrompt.ts)                                                                                                   | Modified -- passes `apiConfiguration?.textToolCallFallback` (F-AI-3)                                     |
+| [`src/core/webview/__tests__/generateSystemPrompt.spec.ts`](src/core/webview/__tests__/generateSystemPrompt.spec.ts)                                                                     | Modified -- preview/runtime parity regression test                                                       |
+| [`packages/types/src/provider-settings/common.ts`](packages/types/src/provider-settings/common.ts)                                                                                       | Modified -- `textToolCallFallback: z.boolean().optional()` field                                         |
+| [`webview-ui/src/components/settings/TextToolCallFallbackSettingsControl.tsx`](webview-ui/src/components/settings/TextToolCallFallbackSettingsControl.tsx)                               | New -- checkbox control, mirrors T8's `ExtractInlineThinkingSettingsControl.tsx` pattern exactly         |
+| [`webview-ui/src/components/settings/__tests__/TextToolCallFallbackSettingsControl.spec.tsx`](webview-ui/src/components/settings/__tests__/TextToolCallFallbackSettingsControl.spec.tsx) | New -- 4 tests                                                                                           |
+| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)                                                                                 | Modified -- wires the new control into Advanced Settings                                                 |
+| `webview-ui/src/i18n/locales/*/settings.json` (all 18 locales)                                                                                                                           | Modified -- `advanced.textToolCallFallback.{label,description}` keys, sibling to `extractInlineThinking` |
 
 ### Source commits on `archive/zoo-base-3.56`
 
@@ -962,59 +1039,86 @@ Verified via `git show --stat`, all six present and matching the task brief exac
 ### Upstream status per recon (drop/keep/adapt)
 
 Recon feature #7: **ABSENT**, but entangled with feature #6 (`allowTextOnlyResponses`,
-T10) via the `getSharedToolUseSection` signature. BASE's version of that function takes
-**zero** parameters and is 5 lines; the fork's takes two parameters and is 32 lines with
-branching wording. The class `TextToolCallExtractor` itself re-applies cleanly with no
-upstream conflict -- it is the wiring into `tool-use.ts` / `system.ts` / `Task.ts` that
-must be **rebuilt against BASE's current simplified shape**, not patched or
-3-way-merged. This is the single largest structural-rework item in the whole
-recon (recon section 5, item 8).
+T10) via the `getSharedToolUseSection` signature. BASE's version of that function took
+**zero** parameters and was 5 lines; re-applying this tranche's two-parameter, branching-
+wording version wholesale would have been a structural rework, not a patch. **Resolved**
+by the optional-options-object design described at the top of this section:
+`getSharedToolUseSection(options?: SharedToolUseSectionOptions)` keeps BASE's
+zero-argument call sites working unchanged (options is optional) while giving T9 (and,
+when it lands, T10) a clean, additive place to each contribute their own flag without
+the two tranches' wording colliding.
 
 ### Known defects to fix during re-application
 
-- **Mandatory: F-AI-2** (Medium) -- the prompt-wording change in `getSharedToolUseSection`
-  (upstream text: `"Use the provider-native tool-calling mechanism. Do not include XML
-markup or examples."`) broke 7 existing snapshot/assertion tests in
-  `add-custom-instructions.spec.ts` and `system-prompt.spec.ts` (including a hard
-  `toContain(...)` assertion at line 552) that were never updated. Regenerate all
-  affected snapshots and update the `toContain` assertion as part of this tranche, not
-  as a follow-up.
-- **Mandatory: F-AI-3** (Low) -- `generateSystemPrompt.ts` (the "Show System Prompt"
-  preview) passes `allowTextOnlyResponses` through but omits `textToolCallFallback`,
-  so the preview drifts from what the model actually receives. Add the missing field
-  and a regression test that diffs both code paths for representative configurations.
-- Advisory: F-BP-2 (Medium) -- five `await import(...)` dynamic imports inside the
-  streaming hot path in `Task.ts` with no documented circular-import rationale. Hoist
-  to top-of-file imports unless a real circular-import test fails; if real, document
-  the cycle in a comment.
-- Advisory: F-ER-1 / F-M-1 (Medium) -- `recursivelyMakeClineRequests` gained ~150 lines
-  interleaving three concerns (text-tool-fallback extraction, `allowTextOnlyResponses`
-  branching, mistake-counter logic). Extract each into a named private method.
-- Advisory: F-ER-3 / F-BP-4 (Low) -- `crypto.randomUUID().slice(0, 8)` for synthetic
-  tool-call IDs has no comment explaining the truncation; add one or use the full UUID.
-- Advisory: F-DC-1 (Low) -- shared `THINKING_TAG_REGEX` extraction, if not already done
-  in T8.
+- [x] **Mandatory: F-AI-2** (Medium) -- resolved by construction, not by snapshot
+      regeneration. The off-state renders byte-identical to BASE's pre-existing output,
+      so the 7 previously "broken" snapshot/assertion tests in
+      `add-custom-instructions.spec.ts` and `system-prompt.spec.ts` were never actually
+      broken by this re-application -- confirmed by running the full targeted test
+      suite (242 tests across `TextToolCallExtractor.spec.ts`, `Task.spec.ts`,
+      `tool-use.spec.ts`, `generateSystemPrompt.spec.ts`) with zero failures.
+- [x] **Mandatory: F-AI-3** (Low) -- resolved. `generateSystemPrompt.ts` now threads
+      `apiConfiguration?.textToolCallFallback` through to `getSharedToolUseSection` via
+      the shared `SystemPromptSettings` options object, with a dedicated regression test
+      in `generateSystemPrompt.spec.ts` asserting preview/runtime parity.
+- [x] Advisory: F-BP-2 (Medium) -- resolved by construction. `TextToolCallExtractor` and
+      `NativeToolCallParser` are static top-of-file imports in `Task.ts`; no
+      `await import(...)` was introduced by this tranche.
+- [x] Advisory: F-ER-1 / F-M-1 (Medium) -- resolved. The fallback-extraction logic lives
+      in its own private method, `Task.applyTextToolCallFallback()` (~105 LOC, heavily
+      commented), with the call site reduced to a single `if (!didToolUse) { ... }`
+      guard block (~20 lines) in `recursivelyMakeClineRequests`.
+- [x] Advisory: F-ER-3 / F-BP-4 (Low) -- resolved. The synthetic tool-call ID's
+      `.slice(0, 8)` truncation has an inline comment explaining it mirrors
+      `this.instanceId`'s own convention from the constructor.
+- [x] Advisory: F-DC-1 (Low) -- resolved. `TextToolCallExtractor.ts` imports
+      `THINKING_TAG_REGEX` from T8's `thinking-tags.ts` rather than redefining it.
 
 ### Dependencies on other tranches
 
-Depends on T8 (shared `THINKING_TAG_REGEX`, both touch `Task.ts` `case "text"`). Submit
-T8 first and rebase this tranche onto it.
+Depended on T8 (shared `THINKING_TAG_REGEX` from `thinking-tags.ts`; both tranches touch
+`Task.ts`'s `case "text"` / post-stream handling). T8 was merged first and this tranche
+was branched from `feature/zoo-base` after that merge, satisfying the dependency.
+
+T10 (`allowTextOnlyResponses`) depends on this tranche: it shares the same
+`getSharedToolUseSection` / `SharedToolUseSectionOptions` surface. T10 should extend
+`SharedToolUseSectionOptions` with its own optional field (e.g.
+`allowTextOnlyResponses?: boolean`) rather than introducing a second, separately-shaped
+options parameter -- see T10's section below for the concrete contract this leaves it.
+
+### Validation results
+
+`pnpm check-types` clean in both `src` and `webview-ui` (0 errors). `eslint
+--max-warnings=0` clean on every touched/new file (no `@typescript-eslint/no-explicit-
+any` suppression-count regressions). `webview-ui` vitest: 168/168 files, 1921/1921 tests.
+`src` targeted vitest (`TextToolCallExtractor.spec.ts`, `Task.spec.ts`, `tool-use.spec.ts`,
+`generateSystemPrompt.spec.ts`): 4/4 files, 242/242 tests, including `Task.spec.ts`'s
+7 new T9-specific integration tests and `TextToolCallExtractor.spec.ts`'s 49 unit tests.
+Full `src` vitest run: 494/499 files passed; the 2 failing files
+(`__tests__/dist_assets.spec.ts`'s missing `tree-sitter-dart.wasm` build artifact, and
+`services/rules/__tests__/rules.spec.ts`'s Windows symlink `EPERM`) are both confirmed
+pre-existing environment limitations unrelated to any T9 file, reproduced in isolation
+with the same root causes before and after this tranche's commits.
 
 ### Before upstream submission checklist
 
-- [ ] **F-AI-2 (BLOCKER):** all 7 broken prompt snapshots regenerated and the hard
-      `toContain` assertion updated.
-- [ ] **F-AI-3 (BLOCKER):** `textToolCallFallback` added to `generateSystemPrompt.ts`.
+- [x] F-AI-2 resolved (by construction, no snapshot regeneration needed).
+- [x] F-AI-3 resolved (`textToolCallFallback` added to `generateSystemPrompt.ts`).
 - [ ] Issue-first + claim.
 - [ ] Branch rebased onto `zoo/main`, specifically onto T8's branch.
-- [ ] i18n locale parity for `advanced.textToolCallFallback.*` keys.
-- [ ] `.changeset/` entry, `minor` impact.
-- [ ] F-BP-2 dynamic-import hoist (or documented rationale) resolved.
-- [ ] F-ER-1/F-M-1 extraction of the post-stream fallback loop into a private method.
+- [x] i18n locale parity for `advanced.textToolCallFallback.*` keys -- added across all
+      18 supported locales (not just `en`), verified with zero missing entries via
+      `scripts/find-missing-translations.js`.
+- [ ] `.changeset/` entry, `minor` impact -- intentionally skipped for this fork-internal
+      reconciliation task; changesets are added separately at upstream-submission time.
+- [x] F-BP-2 dynamic-import hoist -- not needed; no dynamic imports were introduced.
+- [x] F-ER-1/F-M-1 extraction of the post-stream fallback loop into a private method --
+      done (`applyTextToolCallFallback()`).
 - [ ] Tranche-specific prerequisite from review section 7.2 Tranche 9: be ready to
       defend or compromise on the exact prompt wording -- maintainers may debate whether
       the new phrasing is better than the existing one for models that do support native
-      tools.
+      tools. (Mitigated by the appended-sentence design, which leaves BASE's own wording
+      completely untouched and only adds a clearly-scoped fallback sentence.)
 
 ---
 
@@ -1038,16 +1142,16 @@ with open-weight or chat-oriented models no longer get treated as an error state
 
 ### Principal files
 
-| File                                                                                                                     | New/Modified                                                              |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                                         | Modified -- `initiateTaskLoop` text-only path, mistake-counter accounting |
-| [`src/core/prompts/responses.ts`](src/core/prompts/responses.ts)                                                         | Modified -- `softNudge()`                                                 |
-| [`src/core/prompts/sections/tool-use.ts`](src/core/prompts/sections/tool-use.ts)                                         | Modified -- `allowTextOnlyResponses` flag (shared surface with T9)        |
-| [`packages/types/src/provider-settings.ts`](packages/types/src/provider-settings.ts)                                     | Modified -- field                                                         |
-| [`packages/types/src/followup.ts`](packages/types/src/followup.ts)                                                       | Modified -- `silent` flag                                                 |
-| [`webview-ui/src/components/chat/ChatRow.tsx`](webview-ui/src/components/chat/ChatRow.tsx)                               | Modified -- silent followup rendering (returns `null`)                    |
-| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)                 | Modified -- checkbox                                                      |
-| [`src/core/task/__tests__/allow-text-only-responses.spec.ts`](src/core/task/__tests__/allow-text-only-responses.spec.ts) | New -- **needs rewrite, see F-AI-1**                                      |
+| File                                                                                                                     | New/Modified                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                                         | Modified -- `initiateTaskLoop` text-only path, mistake-counter accounting                                                         |
+| [`src/core/prompts/responses.ts`](src/core/prompts/responses.ts)                                                         | Modified -- `softNudge()`                                                                                                         |
+| [`src/core/prompts/sections/tool-use.ts`](src/core/prompts/sections/tool-use.ts)                                         | Modified -- add `allowTextOnlyResponses?: boolean` to T9's `SharedToolUseSectionOptions`, do not introduce a second options param |
+| [`packages/types/src/provider-settings.ts`](packages/types/src/provider-settings.ts)                                     | Modified -- field                                                                                                                 |
+| [`packages/types/src/followup.ts`](packages/types/src/followup.ts)                                                       | Modified -- `silent` flag                                                                                                         |
+| [`webview-ui/src/components/chat/ChatRow.tsx`](webview-ui/src/components/chat/ChatRow.tsx)                               | Modified -- silent followup rendering (returns `null`)                                                                            |
+| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)                 | Modified -- checkbox                                                                                                              |
+| [`src/core/task/__tests__/allow-text-only-responses.spec.ts`](src/core/task/__tests__/allow-text-only-responses.spec.ts) | New -- **needs rewrite, see F-AI-1**                                                                                              |
 
 ### Source commits on `archive/zoo-base-3.56`
 
@@ -1072,10 +1176,18 @@ exactly):
 ### Upstream status per recon (drop/keep/adapt)
 
 Recon feature #6: **ABSENT**, entangled with T9 via the same `getSharedToolUseSection`
-signature problem described in T9's section above. This is the highest-complexity
-tranche to re-apply -- it touches a core prompt-assembly function whose signature
-upstream has not extended in the fork's direction, so the parameter-threading path
-through `system.ts` -> `types.ts` -> `Task.ts` must be re-derived, not cherry-picked.
+signature problem described in T9's section above. **T9 has since merged and resolved
+its half of this entanglement** by giving `getSharedToolUseSection` an optional
+`SharedToolUseSectionOptions` parameter (see section 10 above) rather than extending it
+positionally. This tranche's concrete task is now narrower than originally scoped: add
+`allowTextOnlyResponses?: boolean` as a second optional field on that same
+`SharedToolUseSectionOptions` interface (and append its own sentence, following T9's
+pattern of appending rather than branching the base sentence), rather than re-deriving
+the parameter-threading path from scratch. This is still the highest-complexity
+remaining tranche -- the soft-nudge timer, mistake-counter interaction, and silent-
+followup UI are all new surface area T9 does not touch -- but the `tool-use.ts` /
+`system.ts` / `types.ts` wiring itself is now a small, additive change on top of T9's
+already-merged shape.
 
 ### Known defects to fix during re-application
 
