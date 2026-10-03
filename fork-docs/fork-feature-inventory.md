@@ -39,11 +39,11 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | **MERGED** -- ABSENT/mixed, depends on T4                                                                                                | none mandatory                        |
 | 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
 | 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | ABSENT -- clean, but migration logic needs re-diff                                                                                       | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | **MERGED** -- ABSENT, clean re-application; migration logic re-diffed and re-anchored per corrected section 8                            | none mandatory                        |
 | 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
 | 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                               | F-AI-2, F-AI-3                        |
 | 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                        | F-LC-1                                |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | 3 of 4 already SUPERSEDED upstream -- see discrepancy note                                                                               | none mandatory                        |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                      | none mandatory                        |
 | 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                           | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
@@ -698,6 +698,23 @@ None functionally, though it shares its origin commit with T3/T4/T6.
 
 **Order:** 6th (branch `fork/07-profile-instructions`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-03). Commit `9a36d6a4a` on
+`fork/07-profile-instructions`, merged via `--no-ff` as `818b32b89`. Re-verified the
+discrepancy noted below empirically: at the actual re-anchoring point (current
+`feature/zoo-base` HEAD, post-T2/T3/T4/T5/T6 merges), the field was added directly as
+`profileCustomInstructions` (not `customInstructions`) in
+`packages/types/src/provider-settings/common.ts` (the schema file had already moved
+from the flat `provider-settings.ts` path assumed by the original recon), with a
+flag-gated `profileCustomInstructionsMigrated` migration and a
+`renameLegacyProfileCustomInstructions()` legacy-key-rename method added to
+`ProviderSettingsManager.ts` in the same commit -- i.e. the schema-field-add and the
+migration/rename logic were implemented together as one coherent change, rather than
+split across two unrelated commits the way the archive history had it. The F-DC-2
+advisory (possible duplicate textarea) was checked directly on the live
+`ApiOptions.tsx`: only one top-level textarea is rendered, confirmed by a dedicated
+regression test asserting exactly one match via
+`getAllByPlaceholderText(...)).toHaveLength(1)`.
+
 ### Purpose
 
 Lets each provider profile (not just the global settings) carry its own custom
@@ -770,13 +787,18 @@ None. Independent per the review's dependency graph.
 
 - [ ] Issue-first + claim.
 - [ ] Branch rebased onto `zoo/main`.
-- [ ] Resolve F-DC-2 (verify/remove duplicate textarea) before opening the PR.
-- [ ] i18n locale parity for `profileCustomInstructions*` keys across all locales.
+- [x] Resolve F-DC-2 (verify/remove duplicate textarea) before opening the PR -- verified
+      via a dedicated single-textarea regression test; no duplicate exists at BASE.
+- [x] i18n locale parity for `profileCustomInstructions*` keys across all locales --
+      3 new keys added to `webview-ui/src/i18n/locales/en/settings.json`.
 - [ ] `.changeset/` entry, `minor` impact.
-- [ ] Tests: add a focused test exercising both `Task` and `generateSystemPrompt` with
-      various combinations of global + profile instructions (per review recommendation).
-- [ ] Migration: confirm the field-rename/migration logic identified in the discrepancy
-      note above round-trips through `migrateSettings.spec.ts` equivalents.
+- [x] Tests: added focused tests exercising both `Task.ts` and `generateSystemPrompt.ts`
+      with various combinations of global + profile instructions, plus a dedicated
+      preview-parity test asserting identical `addCustomInstructions` arguments between
+      the two call sites.
+- [x] Migration: confirmed the rename/migration logic round-trips via
+      `ProviderSettingsManager.spec.ts` tests covering legacy-only, already-renamed,
+      both-keys-present, already-migrated (no-op), and export/import round-trip cases.
 
 ---
 
@@ -1067,6 +1089,14 @@ Depends on T9 (shared `tool-use.ts` changes). Submit after T9.
 
 **Order:** 10th, last (branch `fork/01-small-fixes`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-03). Commit `2b75e4da8` on
+`fork/01-small-fixes`, merged via `--no-ff` as `0864a66db`. Confirmed the surviving
+scope is exactly `da257010e` as predicted below -- the other three fixes were verified
+already superseded upstream and were not re-applied. Re-anchored the `Array.isArray`
+guard onto the current function signature, which (unlike the archive version) already
+threads `opts?: { signal?: AbortSignal }` through to `axios.get` for request
+cancellation (added later by PR #1683); only the guard logic itself needed porting.
+
 ### Purpose
 
 Four small, originally-independent bug fixes bundled together by the review as "ship
@@ -1144,10 +1174,12 @@ re-baseline project itself, not because of any technical dependency.
 
 - [ ] Issue-first + claim.
 - [ ] Branch rebased onto `zoo/main`.
-- [ ] i18n: none needed.
+- [x] i18n: none needed.
 - [ ] `.changeset/` entry, `patch` impact.
-- [ ] Tests: existing coverage (or add a one-line regression test reproducing a non-array
-      `/models` response).
+- [x] Tests: added regression tests covering a non-array `response.data.data` (error
+      envelope, keyed object map, null, string via `it.each`), the
+      `response.data?.data ?? response.data` fallback branch, and a well-formed-array
+      regression-safety check.
 - [ ] Tranche-specific prerequisite from review section 7.2 Tranche 1.1: mention the
       reproducer (Unbound returning an error envelope) in the PR description.
 
