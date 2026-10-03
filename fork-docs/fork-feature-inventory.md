@@ -40,7 +40,7 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
 | 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
 | 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | **MERGED** -- ABSENT, clean re-application; migration logic re-diffed and re-anchored per corrected section 8                            | none mandatory                        |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | ABSENT -- clean re-application                                                                                                           | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | **MERGED** -- ABSENT, clean re-application; parser extracted into its own tested module per F-ER-2/F-TC-2 (see corrected section 9)      | none mandatory                        |
 | 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | ABSENT, entangled with `tool-use.ts` shape                                                                                               | F-AI-2, F-AI-3                        |
 | 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                        | F-LC-1                                |
 | 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                      | none mandatory                        |
@@ -806,6 +806,19 @@ None. Independent per the review's dependency graph.
 
 **Order:** 7th (branch `fork/08-inline-thinking`)
 
+**Status: MERGED** into `feature/zoo-base` (2026-10-03). Three commits on
+`fork/08-inline-thinking` -- `35c947e30` (shared `thinking-tags.ts` module +
+`InlineThinkingStreamParser.ts` with 21 unit tests covering chunk-boundary splits,
+unclosed tags, malformed tags, and 1-char-at-a-time streaming), `962dad9ab`
+(`extractInlineThinking` schema field + `Task.ts` streaming-path glue, fixing a
+duplicate-text-message bug discovered during integration testing), and `ab1965ede`
+(webview checkbox + full i18n parity across all 18 locales, not just `en`) -- merged
+via `--no-ff` as `422d33545`. F-ER-2/F-TC-2 (under-tested streaming state machine)
+resolved by extracting the parser into its own pure, testable module rather than
+re-inlining hand-rolled buffer management into `Task.ts`. F-DC-1 (shared
+thinking-tag-regex) deferred to T9 as planned, since T8's re-baseline did not touch
+`TextToolCallExtractor.ts` -- see the dependency note below for what T9 should reuse.
+
 ### Purpose
 
 Streams `<think>`/`<thinking>`/`<reasoning>` tags out of a model's plain-text output in
@@ -820,12 +833,24 @@ collapsible "thinking" UI treatment as models with first-class reasoning support
 
 ### Principal files
 
-| File                                                                                                         | New/Modified                                                      |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                             | Modified -- streaming state machine in `case "text"`              |
-| [`packages/types/src/provider-settings.ts`](packages/types/src/provider-settings.ts)                         | Modified -- `extractInlineThinking` field                         |
-| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)     | Modified -- checkbox                                              |
-| [`src/core/assistant-message/TextToolCallExtractor.ts`](src/core/assistant-message/TextToolCallExtractor.ts) | Modified -- `removeThinkingTags()` static helper (shared with T9) |
+Actual files touched at the re-anchoring point (differs from the original recon table
+below it, which assumed a flat `provider-settings.ts` path and a `TextToolCallExtractor.ts`
+touch that this re-baseline did not need):
+
+| File                                                                                                                                                         | New/Modified                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| [`src/core/assistant-message/thinking-tags.ts`](src/core/assistant-message/thinking-tags.ts)                                                                 | New -- shared `<think>`/`<thinking>`/`<reasoning>` tag definitions                     |
+| [`src/core/assistant-message/InlineThinkingStreamParser.ts`](src/core/assistant-message/InlineThinkingStreamParser.ts)                                       | New -- pure, testable streaming extraction state machine                               |
+| [`src/core/assistant-message/__tests__/InlineThinkingStreamParser.spec.ts`](src/core/assistant-message/__tests__/InlineThinkingStreamParser.spec.ts)         | New -- 21 unit tests (chunk-boundary, unclosed, malformed, 1-char streaming)           |
+| [`src/core/task/Task.ts`](src/core/task/Task.ts)                                                                                                             | Modified -- `case "text"` glue routing extracted reasoning via `say("reasoning", ...)` |
+| [`src/core/task/__tests__/Task.spec.ts`](src/core/task/__tests__/Task.spec.ts)                                                                               | Modified -- integration tests for ordering + no-duplicate-display                      |
+| [`packages/types/src/provider-settings/common.ts`](packages/types/src/provider-settings/common.ts)                                                           | Modified -- `extractInlineThinking` field                                              |
+| [`webview-ui/src/components/settings/ExtractInlineThinkingSettingsControl.tsx`](webview-ui/src/components/settings/ExtractInlineThinkingSettingsControl.tsx) | New -- checkbox control, following `TodoListSettingsControl.tsx`'s pattern             |
+| [`webview-ui/src/components/settings/ApiOptions.tsx`](webview-ui/src/components/settings/ApiOptions.tsx)                                                     | Modified -- wires the new control into Advanced Settings                               |
+| `webview-ui/src/i18n/locales/*/settings.json` (all 18 locales)                                                                                               | Modified -- `advanced.extractInlineThinking.{label,description}` keys                  |
+
+`src/core/assistant-message/TextToolCallExtractor.ts` was **not** touched by T8 in this
+re-baseline (see Dependencies section below for what this means for T9).
 
 ### Source commits on `archive/zoo-base-3.56`
 
@@ -854,28 +879,41 @@ blindly.
 
 ### Known defects to fix during re-application
 
-- Advisory: F-DC-1 (Low) -- duplicate thinking-tag-regex concept between the streaming
-  handler in `Task.ts` and `TextToolCallExtractor`'s post-stream regex strip. Extract a
-  single shared `THINKING_TAG_REGEX` constant; do this here if T8 lands before T9,
-  otherwise defer to T9.
-- Advisory: F-ER-2 / F-TC-2 (Low/Medium) -- the streaming state machine is ~130 lines of
-  hand-rolled buffer management with no direct tests. Extract into its own testable
-  module and add unit tests covering tag boundaries split across chunks, unclosed tags,
-  and malformed tags before submission.
+- [x] Advisory: F-ER-2 / F-TC-2 (Low/Medium) -- resolved. The streaming extraction logic
+      was extracted into its own pure, testable module
+      (`InlineThinkingStreamParser.ts`) rather than hand-rolled inline in `Task.ts`, with
+      21 unit tests covering tag boundaries split across chunks, unclosed tags,
+      malformed tags, and 1-char-at-a-time streaming.
+- [ ] Advisory: F-DC-1 (Low) -- deferred to T9. T8's re-baseline did not touch
+      `TextToolCallExtractor.ts` at all (that file does not yet exist on
+      `feature/zoo-base`; it is introduced by T9). The shared tag definitions already
+      live in `src/core/assistant-message/thinking-tags.ts` -- when T9 lands, it should
+      import/reuse `thinking-tags.ts` (or `InlineThinkingStreamParser.ts`'s exported
+      regex) for its own tag-stripping needs rather than redefining an equivalent regex,
+      satisfying F-DC-1 without any further T8-side work.
 
 ### Dependencies on other tranches
 
-None inbound. T9 depends on this tranche (shared `THINKING_TAG_REGEX` extraction).
+None inbound. T9 depends on this tranche: `src/core/assistant-message/thinking-tags.ts`
+(shared `<think>`/`<thinking>`/`<reasoning>` tag constants/regex) is available on
+`feature/zoo-base` now and should be imported by T9's `TextToolCallExtractor.ts` rather
+than re-implemented, resolving F-DC-1 at T9 integration time.
 
 ### Before upstream submission checklist
 
 - [ ] Issue-first + claim.
 - [ ] Branch rebased onto `zoo/main`.
-- [ ] i18n locale parity for `advanced.extractInlineThinking.*` keys.
-- [ ] `.changeset/` entry, `minor` impact.
-- [ ] Tests: F-ER-2/F-TC-2 streaming-parser unit tests added (essential -- the review
-      calls this out as the single most under-tested piece of new logic in the fork).
-- [ ] Refactor: F-DC-1 shared regex extraction, if not deferred to T9.
+- [x] i18n locale parity for `advanced.extractInlineThinking.*` keys -- added across all
+      18 supported locales (not just `en`), verified with zero missing entries via
+      `scripts/find-missing-translations.js`.
+- [ ] `.changeset/` entry, `minor` impact -- intentionally skipped for this fork-internal
+      reconciliation task; changesets are added separately at upstream-submission time.
+- [x] Tests: F-ER-2/F-TC-2 streaming-parser unit tests added (21 tests in
+      `InlineThinkingStreamParser.spec.ts`), plus `Task.ts` integration tests for
+      ordering and no-duplicate-display behaviour, plus 4 webview control tests.
+- [x] Refactor: F-DC-1 shared regex extraction -- `thinking-tags.ts` created as the
+      shared module; full resolution (T9 importing it) deferred to T9 per the dependency
+      note above.
 
 ---
 
