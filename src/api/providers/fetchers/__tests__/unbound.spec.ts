@@ -38,3 +38,61 @@ it("rejects with an AbortError when the signal aborts the pending request", asyn
 
 	await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 })
+
+// Regression test: Unbound has been observed returning a non-array payload
+// (e.g. an error envelope or keyed object map) from /models, which previously
+// crashed the for...of loop with "rawModels is not iterable" and surfaced as
+// an unhandled rejection that could restart the dev extension host.
+it.each([
+	["an error envelope object", { error: "rate limited" }],
+	["a keyed object map", { "model-a": { id: "model-a" } }],
+	["null", null],
+	["a string", "unexpected"],
+])("returns an empty model list without throwing when response.data.data is %s", async (_case, data) => {
+	mockAxiosGet.mockResolvedValueOnce({ data: { data } })
+
+	const result = await getUnboundModels("test-api-key")
+
+	expect(result).toEqual({})
+})
+
+it("returns an empty model list without throwing when response.data itself is non-array", async () => {
+	// Exercises the `response.data?.data ?? response.data` fallback branch,
+	// where `data` is omitted entirely and `response.data` itself is the
+	// unexpected non-array shape.
+	mockAxiosGet.mockResolvedValueOnce({ data: { error: "unavailable" } })
+
+	const result = await getUnboundModels("test-api-key")
+
+	expect(result).toEqual({})
+})
+
+it("still parses a well-formed array response after the guard", async () => {
+	mockAxiosGet.mockResolvedValueOnce({
+		data: {
+			data: [
+				{
+					id: "model-a",
+					max_output_tokens: 4096,
+					context_window: 100_000,
+				},
+			],
+		},
+	})
+
+	const result = await getUnboundModels("test-api-key")
+
+	expect(result).toEqual({
+		"model-a": {
+			maxTokens: 4096,
+			contextWindow: 100_000,
+			supportsPromptCache: false,
+			supportsImages: false,
+			inputPrice: undefined,
+			outputPrice: undefined,
+			description: undefined,
+			cacheWritesPrice: undefined,
+			cacheReadsPrice: undefined,
+		},
+	})
+})
