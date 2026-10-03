@@ -26,6 +26,14 @@ export const baseProviderSettingsShape = {
 	// the flat global-state store to collide and the profile text to be duplicated
 	// in the system prompt. See ProviderSettingsManager.migrateProfileCustomInstructions.
 	profileCustomInstructions: z.string().optional(),
+
+	// When true, inline thinking tags (<think>, <thinking>, <reasoning>) found in the
+	// model's streamed text output are extracted in real time and rendered as
+	// collapsible reasoning blocks instead of being shown as raw text. Useful for
+	// open-weight and other models that emit their chain-of-thought inline rather than
+	// via a dedicated reasoning-content channel. Works with any provider; does not
+	// require or interact with any other setting.
+	extractInlineThinking: z.boolean().optional(),
 }
 
 export const apiModelIdProviderModelShape = {
