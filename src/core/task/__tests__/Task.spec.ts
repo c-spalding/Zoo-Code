@@ -823,6 +823,215 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("text tool-call fallback (fork tranche T9)", () => {
+		// Mirrors createInlineThinkingTask (T8, above): a fresh Task with
+		// textToolCallFallback enabled by default so each test only states the
+		// overrides it cares about.
+		async function createTextFallbackTask(apiConfigOverrides: Partial<ProviderSettings> = {}) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, textToolCallFallback: true, ...apiConfigOverrides },
+				task: "text fallback test",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			return task
+		}
+
+		function textChunks(...texts: string[]): ApiStreamChunk[] {
+			return texts.map((text) => ({ type: "text", text }))
+		}
+
+		// Same stop-after-first-request convention as T8's mockSingleAttemptApiRequest:
+		// a second attemptApiRequest call only happens when extraction failed to
+		// inject a tool use (the "no tools used" retry path), and these tests only
+		// care about the first turn.
+		function mockSingleAttemptApiRequest(task: Task, chunks: ApiStreamChunk[]) {
+			return vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>(chunks))
+				.mockImplementation(() => {
+					throw new Error("stop after first text-fallback request (test helper)")
+				})
+		}
+
+		// Mirrors the "native tool-call request isolation" describe block's own
+		// stubbing convention: a successfully-extracted tool call is injected into
+		// assistantMessageContent and presented via presentAssistantMessageSafe,
+		// which would otherwise run the REAL tool handler (e.g. attempt_completion's
+		// askApproval flow). These tests only assert on the extraction/injection
+		// step itself, not on downstream tool execution, so the presenter is
+		// stubbed to a no-op - exactly as the native-tool-call tests do for the
+		// same reason.
+		function stubPresenterNoOp(task: Task) {
+			return vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+		}
+
+		it("extracts an XML-format tool call, injects a synthetic tool_use block, patches API history, and rewrites the displayed text to the markup-stripped version", async () => {
+			const task = await createTextFallbackTask()
+			stubPresenterNoOp(task)
+
+			const rawText = "I'll finish now.\n\n<attempt_completion><result>All done</result></attempt_completion>"
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const injectedToolUse = task.assistantMessageContent.find(
+				(block) => block.type === "tool_use" && block.name === "attempt_completion",
+			)
+			expect(injectedToolUse).toBeDefined()
+			expect(injectedToolUse).toMatchObject({ nativeArgs: { result: "All done" } })
+
+			// The markup is stripped from the block that would be displayed to the
+			// user, even though the raw markup-inclusive text is preserved in API
+			// history below (same preservation rule T8 established for thinking tags).
+			const textBlock = task.assistantMessageContent.find((block) => block.type === "text")
+			expect(textBlock).toMatchObject({ content: "I'll finish now." })
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toEqual([
+				{ type: "text", text: rawText },
+				{
+					type: "tool_use",
+					id: expect.stringMatching(/^text-extract-/),
+					name: "attempt_completion",
+					input: { result: "All done" },
+				},
+			])
+		})
+
+		it("extracts an Anthropic invoke-format tool call", async () => {
+			const task = await createTextFallbackTask()
+			stubPresenterNoOp(task)
+
+			const rawText =
+				'Sure.\n\n<invoke name="attempt_completion"><parameter name="result">Invoke works</parameter></invoke>'
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const injectedToolUse = task.assistantMessageContent.find(
+				(block) => block.type === "tool_use" && block.name === "attempt_completion",
+			)
+			expect(injectedToolUse).toBeDefined()
+			expect(injectedToolUse).toMatchObject({ nativeArgs: { result: "Invoke works" } })
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toContainEqual({
+				type: "tool_use",
+				id: expect.stringMatching(/^text-extract-/),
+				name: "attempt_completion",
+				input: { result: "Invoke works" },
+			})
+		})
+
+		it("extracts a fenced JSON tool_call block", async () => {
+			const task = await createTextFallbackTask()
+			stubPresenterNoOp(task)
+
+			const rawText =
+				'Sure.\n\n```tool_call\n{"name": "attempt_completion", "arguments": {"result": "Json works"}}\n```'
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const injectedToolUse = task.assistantMessageContent.find(
+				(block) => block.type === "tool_use" && block.name === "attempt_completion",
+			)
+			expect(injectedToolUse).toBeDefined()
+			expect(injectedToolUse).toMatchObject({ nativeArgs: { result: "Json works" } })
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toContainEqual({
+				type: "tool_use",
+				id: expect.stringMatching(/^text-extract-/),
+				name: "attempt_completion",
+				input: { result: "Json works" },
+			})
+		})
+
+		it('does not re-emit extracted thinking via say("reasoning", ...) when T8\'s live inline-thinking parser already streamed it this turn', async () => {
+			const task = await createTextFallbackTask({ extractInlineThinking: true })
+			stubPresenterNoOp(task)
+
+			const rawText =
+				"<think>plan it</think>\n\n<attempt_completion><result>Done thinking</result></attempt_completion>"
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const reasoningSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			// Exactly the one emitted live by T8's streaming parser during the
+			// "text" chunk handler - the fallback method must not emit
+			// extracted.thinking a second time, which would duplicate the block.
+			expect(reasoningSays).toHaveLength(1)
+			expect(reasoningSays[0].text).toBe("plan it")
+
+			const injectedToolUse = task.assistantMessageContent.find(
+				(block) => block.type === "tool_use" && block.name === "attempt_completion",
+			)
+			expect(injectedToolUse).toBeDefined()
+		})
+
+		it('emits extracted thinking via say("reasoning", ...) when no live inline-thinking parser was active this turn', async () => {
+			const task = await createTextFallbackTask()
+			stubPresenterNoOp(task)
+
+			const rawText =
+				"<think>plan it</think>\n\n<attempt_completion><result>Done thinking</result></attempt_completion>"
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			const reasoningSays = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			// No live parser ran this turn (extractInlineThinking unset), so this is
+			// the only reasoning say() - emitted by the fallback method itself from
+			// the extractor's always-on thinking-tag stripping.
+			expect(reasoningSays).toHaveLength(1)
+			expect(reasoningSays[0].text).toBe("plan it")
+
+			const injectedToolUse = task.assistantMessageContent.find(
+				(block) => block.type === "tool_use" && block.name === "attempt_completion",
+			)
+			expect(injectedToolUse).toBeDefined()
+		})
+
+		it("does not extract a tool call for a tool outside the resolved policy allowlist", async () => {
+			const task = await createTextFallbackTask()
+
+			// codebase_search is pruned from every resolved policy in this test file
+			// regardless of mode, since CodeIndexManagerRegistry.getOrCreate is
+			// globally mocked to return undefined (no code index manager instance) -
+			// see the top-of-file vi.mock for "../../../services/code-index/code-index-manager-registry".
+			// The extractor must leave this markup untouched rather than independently
+			// deciding the tool "looks" extractable.
+			const rawText = "<codebase_search><query>find auth logic</query></codebase_search>"
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			expect(task.assistantMessageContent.some((block) => block.type === "tool_use")).toBe(false)
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toEqual([{ type: "text", text: rawText }])
+		})
+
+		it("never invokes the extractor when textToolCallFallback is not enabled on the active profile", async () => {
+			const task = await createTextFallbackTask({ textToolCallFallback: false })
+
+			const rawText = "<attempt_completion><result>Should stay as text</result></attempt_completion>"
+			mockSingleAttemptApiRequest(task, textChunks(rawText))
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }])
+
+			expect(task.assistantMessageContent.some((block) => block.type === "tool_use")).toBe(false)
+
+			const assistantHistoryMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			expect(assistantHistoryMessage?.content).toEqual([{ type: "text", text: rawText }])
+		})
+	})
+
 	describe("constructor", () => {
 		it.each([{ apiConfigName: "parent-local-profile" }, { apiConfigName: undefined }])(
 			"uses an explicit delegated-child context without shared state or startup persistence",

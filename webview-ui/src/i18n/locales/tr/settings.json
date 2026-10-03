@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Satır içi düşünme etiketlerini çıkar",
 			"description": "Etkinleştirildiğinde, Zoo bir modelin düz metin çıktısındaki <think>, <thinking> ve <reasoning> etiketlerini algılar ve içeriklerini yanıtta ham etiketleri göstermek yerine katlanabilir bir akıl yürütme bloğu olarak görüntüler."
+		},
+		"textToolCallFallback": {
+			"label": "Metin tabanlı araç çağrılarına geri dön",
+			"description": "Etkinleştirildiğinde, model yerel bir araç çağrısı kullanmak yerine düz metinle yanıt verirse, Zoo metinde XML, Anthropic-invoke veya JSON kod bloğu biçiminde bir araç çağrısı arar ve bunu yürütür. Yerel fonksiyon çağırma desteği olmayan modeller için kullanışlıdır (örneğin, Bedrock veya yerel çıkarım sunucuları üzerinden sunulan birçok açık ağırlıklı model). Yerel fonksiyon çağırmayı destekleyen modellere bunu tercih etmeleri talimatı verilir, bu nedenle davranışları değişmez."
 		}
 	},
 	"experimental": {

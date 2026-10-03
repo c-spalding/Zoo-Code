@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Inline-Denk-Tags extrahieren",
 			"description": "Wenn aktiviert, erkennt Zoo <think>-, <thinking>- und <reasoning>-Tags in der reinen Textausgabe eines Modells und zeigt deren Inhalt als einklappbaren Reasoning-Block an, anstatt die rohen Tags in der Antwort anzuzeigen."
+		},
+		"textToolCallFallback": {
+			"label": "Auf textbasierte Tool-Aufrufe zurückgreifen",
+			"description": "Wenn aktiviert, durchsucht Zoo den Text nach einem XML-, Anthropic-Invoke- oder JSON-in-Codeblock-Tool-Aufruf und führt ihn aus, falls das Modell mit reinem Text antwortet, anstatt einen nativen Tool-Aufruf zu verwenden. Nützlich für Modelle ohne native Funktionsaufruf-Unterstützung (z. B. viele Open-Weight-Modelle über Bedrock oder lokale Inferenzserver). Modelle, die native Funktionsaufrufe unterstützen, werden angewiesen, diese zu bevorzugen, sodass sich ihr Verhalten nicht ändert."
 		}
 	},
 	"experimental": {

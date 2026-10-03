@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Ekstrak tag pemikiran inline",
 			"description": "Saat diaktifkan, Zoo mendeteksi tag <think>, <thinking>, dan <reasoning> dalam output teks biasa model dan menampilkan isinya sebagai blok penalaran yang dapat dilipat, bukan menampilkan tag mentah dalam respons."
+		},
+		"textToolCallFallback": {
+			"label": "Kembali ke panggilan alat berbasis teks",
+			"description": "Saat diaktifkan, jika model merespons dengan teks biasa alih-alih menggunakan panggilan alat native, Zoo memindai teks untuk panggilan alat berformat XML, Anthropic-invoke, atau JSON dalam blok kode berpagar dan mengeksekusinya. Berguna untuk model tanpa dukungan panggilan fungsi native (misalnya, banyak model open-weight yang disajikan melalui Bedrock atau server inferensi lokal). Model yang mendukung panggilan fungsi native diinstruksikan untuk memprioritaskannya, sehingga perilakunya tidak berubah."
 		}
 	},
 	"experimental": {

@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Extraire les balises de pensée en ligne",
 			"description": "Lorsqu'activé, Zoo détecte les balises <think>, <thinking> et <reasoning> dans la sortie en texte brut d'un modèle et affiche leur contenu comme un bloc de raisonnement repliable, au lieu d'afficher les balises brutes dans la réponse."
+		},
+		"textToolCallFallback": {
+			"label": "Revenir aux appels d'outils basés sur le texte",
+			"description": "Lorsqu'activé, si le modèle répond en texte brut au lieu d'utiliser un appel d'outil natif, Zoo analyse le texte à la recherche d'un appel d'outil au format XML, Anthropic-invoke ou JSON dans un bloc de code et l'exécute. Utile pour les modèles sans prise en charge native des appels de fonction (par exemple, de nombreux modèles à poids ouverts servis via Bedrock ou des serveurs d'inférence locaux). Les modèles qui prennent en charge les appels de fonction natifs sont invités à les privilégier, donc leur comportement reste inchangé."
 		}
 	},
 	"experimental": {

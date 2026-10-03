@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Trích xuất thẻ suy nghĩ nội tuyến",
 			"description": "Khi được bật, Zoo phát hiện các thẻ <think>, <thinking> và <reasoning> trong đầu ra văn bản thuần của mô hình và hiển thị nội dung của chúng dưới dạng khối lý luận có thể thu gọn, thay vì hiển thị các thẻ thô trong phản hồi."
+		},
+		"textToolCallFallback": {
+			"label": "Dự phòng gọi công cụ dựa trên văn bản",
+			"description": "Khi được bật, nếu mô hình phản hồi bằng văn bản thuần thay vì sử dụng lệnh gọi công cụ gốc, Zoo sẽ quét văn bản để tìm lệnh gọi công cụ dạng XML, Anthropic-invoke, hoặc JSON trong khối mã và thực thi nó. Hữu ích cho các mô hình không có hỗ trợ gọi hàm gốc (ví dụ: nhiều mô hình trọng số mở được phục vụ qua Bedrock hoặc máy chủ suy luận cục bộ). Các mô hình có hỗ trợ gọi hàm gốc được hướng dẫn ưu tiên sử dụng nó, vì vậy hành vi của chúng không thay đổi."
 		}
 	},
 	"experimental": {

@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Extreu etiquetes de pensament en línia",
 			"description": "Quan està activat, Zoo detecta les etiquetes <think>, <thinking> i <reasoning> a la sortida de text pla d'un model i mostra el seu contingut com un bloc de raonament plegable, en lloc de mostrar les etiquetes en brut a la resposta."
+		},
+		"textToolCallFallback": {
+			"label": "Recórrer a trucades d'eines basades en text",
+			"description": "Quan està activat, si el model respon amb text pla en lloc d'utilitzar una trucada d'eina nativa, Zoo escaneja el text per trobar una trucada d'eina en format XML, Anthropic-invoke o JSON dins d'un bloc de codi i l'executa. Útil per a models sense suport natiu de crida de funcions (per exemple, molts models de pesos oberts servits via Bedrock o servidors d'inferència locals). Els models que sí que admeten crides de funció natives reben la instrucció de prioritzar-les, de manera que el seu comportament no canvia."
 		}
 	},
 	"experimental": {

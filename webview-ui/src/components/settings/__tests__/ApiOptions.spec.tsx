@@ -190,6 +190,22 @@ vi.mock("../ExtractInlineThinkingSettingsControl", () => ({
 	),
 }))
 
+// Mock TextToolCallFallbackSettingsControl for tests
+vi.mock("../TextToolCallFallbackSettingsControl", () => ({
+	TextToolCallFallbackSettingsControl: ({ textToolCallFallback, onChange }: any) => (
+		<div data-testid="text-tool-call-fallback-settings-control">
+			<label>
+				Fall back to text-based tool calls
+				<input
+					type="checkbox"
+					checked={textToolCallFallback}
+					onChange={(e) => onChange("textToolCallFallback", e.target.checked)}
+				/>
+			</label>
+		</div>
+	),
+}))
+
 // Mock ThinkingBudget component
 vi.mock("../ThinkingBudget", () => ({
 	ThinkingBudget: ({ modelInfo, apiConfiguration, setApiConfigurationField }: any) => {

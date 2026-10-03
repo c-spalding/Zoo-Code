@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "인라인 생각 태그 추출",
 			"description": "활성화하면 Zoo는 모델의 일반 텍스트 출력에서 <think>, <thinking>, <reasoning> 태그를 감지하고, 응답에 원시 태그를 표시하는 대신 해당 내용을 접을 수 있는 추론 블록으로 표시합니다."
+		},
+		"textToolCallFallback": {
+			"label": "텍스트 기반 도구 호출로 대체",
+			"description": "활성화하면 모델이 네이티브 도구 호출을 사용하는 대신 일반 텍스트로 응답할 경우, Zoo가 텍스트에서 XML, Anthropic-invoke 또는 JSON 코드 블록 형식의 도구 호출을 검색하여 실행합니다. 네이티브 함수 호출을 지원하지 않는 모델(예: Bedrock이나 로컬 추론 서버를 통해 제공되는 많은 오픈 웨이트 모델)에 유용합니다. 네이티브 함수 호출을 지원하는 모델은 이를 우선 사용하도록 지시되므로 동작이 변경되지 않습니다."
 		}
 	},
 	"experimental": {

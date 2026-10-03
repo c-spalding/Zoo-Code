@@ -34,6 +34,16 @@ export const baseProviderSettingsShape = {
 	// via a dedicated reasoning-content channel. Works with any provider; does not
 	// require or interact with any other setting.
 	extractInlineThinking: z.boolean().optional(),
+
+	// When true, if the model responds with text only (no native tool calls), the
+	// system prompt gains an additional instruction describing an XML tool-call
+	// fallback format, and the response text is scanned for XML / Anthropic-<invoke> /
+	// JSON-in-fenced-code tool calls after streaming completes. This lets models
+	// without native function-calling support (e.g. many open-weight models served via
+	// Bedrock or local inference servers) still invoke tools. Models that do support
+	// native function-calling are instructed to prefer it, so their behaviour is
+	// unchanged. Defaults to off so existing system-prompt output is unaffected.
+	textToolCallFallback: z.boolean().optional(),
 }
 
 export const apiModelIdProviderModelShape = {

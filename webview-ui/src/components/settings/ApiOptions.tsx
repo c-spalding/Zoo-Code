@@ -97,6 +97,7 @@ import { ThinkingBudget } from "./ThinkingBudget"
 import { Verbosity } from "./Verbosity"
 import { TodoListSettingsControl } from "./TodoListSettingsControl"
 import { ExtractInlineThinkingSettingsControl } from "./ExtractInlineThinkingSettingsControl"
+import { TextToolCallFallbackSettingsControl } from "./TextToolCallFallbackSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
@@ -809,6 +810,10 @@ const ApiOptions = ({
 								/>
 								<ExtractInlineThinkingSettingsControl
 									extractInlineThinking={apiConfiguration.extractInlineThinking}
+									onChange={(field, value) => setApiConfigurationField(field, value)}
+								/>
+								<TextToolCallFallbackSettingsControl
+									textToolCallFallback={apiConfiguration.textToolCallFallback}
 									onChange={(field, value) => setApiConfigurationField(field, value)}
 								/>
 								{selectedModelInfo?.supportsTemperature !== false && (

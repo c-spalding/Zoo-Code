@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "提取内联思考标签",
 			"description": "启用后，Zoo 会检测模型纯文本输出中的 <think>、<thinking> 和 <reasoning> 标签，并将其内容显示为可折叠的推理块，而不是在响应中显示原始标签。"
+		},
+		"textToolCallFallback": {
+			"label": "回退到基于文本的工具调用",
+			"description": "启用后，如果模型以纯文本而非原生工具调用的方式响应，Zoo 会在文本中扫描 XML、Anthropic-invoke 或 JSON 围栏代码格式的工具调用并执行它。这对于不支持原生函数调用的模型很有用（例如许多通过 Bedrock 或本地推理服务器提供的开放权重模型）。支持原生函数调用的模型会被指示优先使用它，因此其行为不受影响。"
 		}
 	},
 	"experimental": {

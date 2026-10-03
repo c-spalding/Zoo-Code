@@ -28,4 +28,51 @@ describe("getSharedToolUseSection", () => {
 		expect(section).not.toContain("<actual_tool_name>")
 		expect(section).not.toContain("</actual_tool_name>")
 	})
+
+	// Fork tranche T9 (textToolCallFallback). These guard the off-state
+	// byte-identity requirement: calling with no options, or with the flag
+	// explicitly false/undefined, must never change existing prompt output
+	// (see fork-docs/fork-feature-inventory.md T9 defect F-AI-2).
+	describe("textToolCallFallback flag", () => {
+		const baseSection = getSharedToolUseSection()
+
+		it("produces byte-identical output when called with no options", () => {
+			expect(getSharedToolUseSection(undefined)).toBe(baseSection)
+		})
+
+		it("produces byte-identical output when textToolCallFallback is false", () => {
+			expect(getSharedToolUseSection({ textToolCallFallback: false })).toBe(baseSection)
+		})
+
+		it("produces byte-identical output when textToolCallFallback is undefined", () => {
+			expect(getSharedToolUseSection({ textToolCallFallback: undefined })).toBe(baseSection)
+		})
+
+		it("appends XML fallback guidance when textToolCallFallback is true", () => {
+			const section = getSharedToolUseSection({ textToolCallFallback: true })
+
+			expect(section).toContain("If you do not have native function-calling capability")
+			expect(section).toContain("<tool_name>")
+			expect(section).toContain("<parameter_name>value</parameter_name>")
+			expect(section).toContain("<thinking>...</thinking>")
+		})
+
+		it("still includes the unchanged base sentence when the flag is true", () => {
+			const section = getSharedToolUseSection({ textToolCallFallback: true })
+
+			expect(section).toContain("Use the provider-native tool-calling mechanism")
+			expect(section).toContain("Do not include XML markup or examples.")
+			expect(section).toContain("You must call at least one tool per assistant response")
+		})
+
+		it("keeps everything before the fallback sentence identical to the off-state output", () => {
+			const onSection = getSharedToolUseSection({ textToolCallFallback: true })
+			const insertionPoint = onSection.indexOf(" If you do not have native function-calling capability")
+
+			expect(insertionPoint).toBeGreaterThan(-1)
+			expect(onSection.slice(0, insertionPoint)).toBe(
+				baseSection.slice(0, baseSection.indexOf(" You must call at least one tool")),
+			)
+		})
+	})
 })

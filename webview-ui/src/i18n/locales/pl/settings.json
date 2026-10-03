@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Wyodrębnij znaczniki myślenia w tekście",
 			"description": "Po włączeniu Zoo wykrywa znaczniki <think>, <thinking> i <reasoning> w tekście odpowiedzi modelu i wyświetla ich treść jako zwijany blok rozumowania, zamiast pokazywać surowe znaczniki w odpowiedzi."
+		},
+		"textToolCallFallback": {
+			"label": "Powrót do wywołań narzędzi opartych na tekście",
+			"description": "Po włączeniu, jeśli model odpowiada czystym tekstem zamiast używać natywnego wywołania narzędzia, Zoo skanuje tekst w poszukiwaniu wywołania narzędzia w formacie XML, Anthropic-invoke lub JSON w blokach kodu i wykonuje je. Przydatne dla modeli bez natywnego wsparcia wywołań funkcji (np. wiele modeli open-weight udostępnianych przez Bedrock lub lokalne serwery wnioskowania). Modele, które wspierają natywne wywołania funkcji, są instruowane, aby je preferować, więc ich zachowanie się nie zmienia."
 		}
 	},
 	"experimental": {

@@ -917,6 +917,10 @@
 		"extractInlineThinking": {
 			"label": "Extrair tags de pensamento inline",
 			"description": "Quando habilitado, o Zoo detecta tags <think>, <thinking> e <reasoning> na saída de texto simples de um modelo e exibe seu conteúdo como um bloco de raciocínio recolhível, em vez de mostrar as tags brutas na resposta."
+		},
+		"textToolCallFallback": {
+			"label": "Recorrer a chamadas de ferramentas baseadas em texto",
+			"description": "Quando habilitado, se o modelo responder com texto simples em vez de usar uma chamada de ferramenta nativa, o Zoo examina o texto em busca de uma chamada de ferramenta em formato XML, Anthropic-invoke ou JSON em bloco de código e a executa. Útil para modelos sem suporte nativo a chamadas de função (por exemplo, muitos modelos de pesos abertos disponibilizados via Bedrock ou servidores de inferência locais). Modelos que suportam chamadas de função nativas são instruídos a priorizá-las, portanto, seu comportamento permanece inalterado."
 		}
 	},
 	"experimental": {

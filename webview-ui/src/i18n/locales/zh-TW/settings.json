@@ -944,6 +944,10 @@
 		"extractInlineThinking": {
 			"label": "擷取內嵌思考標籤",
 			"description": "啟用後，Zoo 會偵測模型純文字輸出中的 <think>、<thinking> 和 <reasoning> 標籤，並將其內容顯示為可摺疊的推理區塊，而不是在回應中顯示原始標籤。"
+		},
+		"textToolCallFallback": {
+			"label": "回退至文字型工具呼叫",
+			"description": "啟用後，如果模型以純文字而非使用原生工具呼叫回應，Zoo 會在文字中掃描 XML、Anthropic-invoke 或 JSON 圍欄程式碼格式的工具呼叫並執行它。這對於不支援原生函式呼叫的模型很有用（例如許多透過 Bedrock 或本地推理伺服器提供的開放權重模型）。支援原生函式呼叫的模型會被指示優先使用它，因此其行為不受影響。"
 		}
 	},
 	"experimental": {
