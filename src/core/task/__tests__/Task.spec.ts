@@ -869,6 +869,35 @@ describe("Cline", () => {
 			expect(settings).toMatchObject({ todoListEnabled: true })
 		})
 
+		it("threads the task's own profileCustomInstructions into the settings passed to SYSTEM_PROMPT", async () => {
+			const taskApiConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				profileCustomInstructions: "Be extra concise for this profile.",
+			}
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: taskApiConfiguration,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			// The focused provider's apiConfiguration diverges (no
+			// profileCustomInstructions); the task-local snapshot captured at
+			// construction must still be what reaches SYSTEM_PROMPT.
+			const focusedProviderState = providerStateWith({
+				apiConfiguration: { ...mockApiConfig, profileCustomInstructions: undefined },
+			})
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await getTaskTestAccess(task).getSystemPrompt(focusedProviderState)
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			const [, , , , , , , , , , , , settings] = systemPromptCall
+			expect(settings).toMatchObject({ profileCustomInstructions: "Be extra concise for this profile." })
+		})
+
 		it("passes undefined disabledTools when the threaded snapshot carries none", async () => {
 			const task = new Task({
 				provider: mockProvider,

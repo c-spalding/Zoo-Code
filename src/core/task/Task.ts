@@ -4312,6 +4312,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						.getConfiguration(Package.name)
 						.get<boolean>("newTaskRequireTodos", false),
 					isStealthModel: modelInfo?.isStealthModel,
+					// Per-profile custom instructions are kept separate from the global
+					// value above so the system prompt can render them under distinct
+					// headings (see SystemPromptSettings.profileCustomInstructions).
+					profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
 				},
 				undefined, // todoList
 				this.api.getModel().id,

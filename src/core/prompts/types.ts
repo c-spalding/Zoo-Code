@@ -9,4 +9,10 @@ export interface SystemPromptSettings {
 	newTaskRequireTodos: boolean
 	/** When true, model should hide vendor/company identity in responses */
 	isStealthModel?: boolean
+	/**
+	 * Per-profile custom instructions for the active provider profile. Kept separate
+	 * from the global custom instructions so the two can be rendered under distinct
+	 * headings without colliding (see provider-settings `profileCustomInstructions`).
+	 */
+	profileCustomInstructions?: string
 }

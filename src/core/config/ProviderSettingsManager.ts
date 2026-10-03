@@ -46,6 +46,7 @@ export const providerProfilesSchema = z.object({
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
 			routerProviderMigrated: z.boolean().optional(),
+			profileCustomInstructionsMigrated: z.boolean().optional(),
 		})
 		.optional(),
 })
@@ -71,6 +72,7 @@ export class ProviderSettingsManager {
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 			routerProviderMigrated: true, // Mark as migrated on fresh installs
+			profileCustomInstructionsMigrated: true, // Mark as migrated on fresh installs
 		},
 	}
 
@@ -144,6 +146,7 @@ export class ProviderSettingsManager {
 						todoListEnabledMigrated: false,
 						claudeCodeLegacySettingsMigrated: false,
 						routerProviderMigrated: false,
+						profileCustomInstructionsMigrated: false,
 					} // Initialize with default values
 					isDirty = true
 				}
@@ -198,6 +201,16 @@ export class ProviderSettingsManager {
 					}
 
 					providerProfiles.migrations.claudeCodeLegacySettingsMigrated = true
+					isDirty = true
+				}
+
+				if (!providerProfiles.migrations.profileCustomInstructionsMigrated) {
+					// load() has already renamed the legacy per-profile `customInstructions`
+					// key to `profileCustomInstructions` in memory (see
+					// renameLegacyProfileCustomInstructions). Forcing a persisted rewrite
+					// here removes the legacy key from the stored JSON so it does not
+					// linger. Marking the flag ensures this runs only once.
+					providerProfiles.migrations.profileCustomInstructionsMigrated = true
 					isDirty = true
 				}
 
@@ -629,9 +642,14 @@ export class ProviderSettingsManager {
 
 			const apiConfigs = Object.entries(providerProfiles.apiConfigs).reduce(
 				(acc, [key, apiConfig]) => {
+					// Rename the legacy per-profile `customInstructions` key to
+					// `profileCustomInstructions` on the raw object BEFORE strict
+					// parsing, so the old key isn't silently stripped by the schema.
+					const renamedConfig = this.renameLegacyProfileCustomInstructions(apiConfig)
+
 					// First, sanitize invalid apiProvider values before parsing
 					// This handles removed providers (like "glama") gracefully
-					const sanitizedConfig = this.sanitizeProviderConfig(apiConfig)
+					const sanitizedConfig = this.sanitizeProviderConfig(renamedConfig)
 
 					// For retired providers, use passthrough() to preserve legacy
 					// provider-specific fields (e.g. groqApiKey, deepInfraModelId)
@@ -700,6 +718,39 @@ export class ProviderSettingsManager {
 		}
 
 		return apiConfig
+	}
+
+	/**
+	 * Renames the legacy per-profile `customInstructions` key to
+	 * `profileCustomInstructions` on a raw (unparsed) config object.
+	 *
+	 * The per-profile field was originally named `customInstructions`, which
+	 * collided with the global `customInstructions` setting's key name once
+	 * both were flattened into the same storage namespace, causing the
+	 * profile's text to duplicate into the system prompt. The field was
+	 * renamed to `profileCustomInstructions` to disambiguate it; this helper
+	 * performs the one-time, idempotent rename on load so existing stored
+	 * profiles keep their value under the new key. If a profile somehow
+	 * already has a non-empty `profileCustomInstructions`, that value wins
+	 * and the legacy key is simply dropped rather than overwritten.
+	 */
+	private renameLegacyProfileCustomInstructions(apiConfig: unknown): unknown {
+		if (typeof apiConfig !== "object" || apiConfig === null) {
+			return apiConfig
+		}
+
+		const config = apiConfig as Record<string, unknown>
+
+		if (!("customInstructions" in config)) {
+			return apiConfig
+		}
+
+		const { customInstructions: legacyValue, ...rest } = config
+
+		const hasNewValue =
+			typeof rest.profileCustomInstructions === "string" && rest.profileCustomInstructions.length > 0
+
+		return hasNewValue ? rest : { ...rest, profileCustomInstructions: legacyValue }
 	}
 
 	private async store(providerProfiles: ProviderProfiles) {

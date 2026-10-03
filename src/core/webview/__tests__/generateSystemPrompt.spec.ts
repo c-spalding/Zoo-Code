@@ -55,6 +55,7 @@ import { SYSTEM_PROMPT } from "../../prompts/system"
 import { getCapabilitiesSection } from "../../prompts/sections/capabilities"
 import { getRulesSection } from "../../prompts/sections/rules"
 import type { EffectiveToolPolicy } from "../../prompts/tools/effective-tool-policy"
+import { addCustomInstructions } from "../../prompts/sections/custom-instructions"
 import { generateSystemPrompt } from "../generateSystemPrompt"
 import type { ClineProvider } from "../ClineProvider"
 import "../../../utils/path"
@@ -398,6 +399,69 @@ describe("generateSystemPrompt preview parity", () => {
 		)
 
 		expect(prompt).toContain("OBJECTIVE")
+	})
+
+	it("threads the active profile's profileCustomInstructions into addCustomInstructions identically to the direct SYSTEM_PROMPT call", async () => {
+		// This file mocks addCustomInstructions to a no-op; rather than un-mock it,
+		// assert both paths pass it the *same* profileCustomInstructions value in
+		// options.settings. That is the exact contract Task.getSystemPrompt and
+		// generateSystemPrompt must preserve for the preview to never drift from
+		// what the model actually receives.
+		const addCustomInstructionsMock = vi.mocked(addCustomInstructions)
+
+		getStateMock.mockResolvedValueOnce({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+				profileCustomInstructions: "Be extra concise for this profile.",
+			},
+			customModePrompts: undefined,
+			customInstructions: undefined,
+			mcpEnabled: false,
+			experiments: {},
+			language: undefined,
+			enableSubfolderRules: false,
+			disabledTools: undefined,
+		})
+
+		addCustomInstructionsMock.mockClear()
+		await generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+		expect(addCustomInstructionsMock).toHaveBeenCalledTimes(1)
+		const previewOptions = addCustomInstructionsMock.mock.calls[0]?.[4] as
+			| { settings?: { profileCustomInstructions?: string } }
+			| undefined
+
+		addCustomInstructionsMock.mockClear()
+		await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			"code",
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			{}, // experiments
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			{ ...fullSettings, profileCustomInstructions: "Be extra concise for this profile." }, // settings
+			undefined, // todoList
+			undefined, // modelId
+			undefined, // skillsManager
+			undefined, // disabledTools
+			fullModelInfo, // modelInfo
+		)
+		expect(addCustomInstructionsMock).toHaveBeenCalledTimes(1)
+		const directOptions = addCustomInstructionsMock.mock.calls[0]?.[4] as
+			| { settings?: { profileCustomInstructions?: string } }
+			| undefined
+
+		expect(previewOptions?.settings?.profileCustomInstructions).toBe("Be extra concise for this profile.")
+		expect(directOptions?.settings?.profileCustomInstructions).toBe("Be extra concise for this profile.")
+		expect(previewOptions?.settings?.profileCustomInstructions).toBe(
+			directOptions?.settings?.profileCustomInstructions,
+		)
 	})
 
 	describe("preview metadata-fetch robustness", () => {

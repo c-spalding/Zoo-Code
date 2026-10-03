@@ -102,6 +102,11 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 				.getConfiguration(Package.name)
 				.get<boolean>("newTaskRequireTodos", false),
 			isStealthModel: modelInfo?.isStealthModel,
+			// Mirrors Task.getSystemPrompt: the preview must combine the active
+			// profile's custom instructions the same way the runtime path does, or
+			// the "Show System Prompt" preview silently drifts from what the model
+			// actually receives.
+			profileCustomInstructions: apiConfiguration?.profileCustomInstructions,
 		},
 		undefined, // todoList
 		undefined, // modelId

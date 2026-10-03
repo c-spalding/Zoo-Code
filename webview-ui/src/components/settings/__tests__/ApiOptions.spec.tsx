@@ -674,4 +674,66 @@ describe("ApiOptions", () => {
 
 		expect(providerOptions).not.toContain("groq")
 	})
+
+	describe("profile custom instructions", () => {
+		// Regression guard for F-DC-2: the per-profile custom instructions
+		// textarea must be rendered exactly once, at the top level, regardless
+		// of which provider is selected -- never duplicated inside a
+		// provider-specific branch.
+		it("renders exactly one profile custom instructions textarea", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					profileCustomInstructions: "Existing text",
+				},
+			})
+
+			const textareas = screen.getAllByPlaceholderText("settings:providers.profileCustomInstructionsPlaceholder")
+			expect(textareas).toHaveLength(1)
+			expect(textareas[0]).toHaveValue("Existing text")
+		})
+
+		it("still renders exactly one profile custom instructions textarea for a different provider", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					profileCustomInstructions: "Anthropic-profile text",
+				},
+			})
+
+			const textareas = screen.getAllByPlaceholderText("settings:providers.profileCustomInstructionsPlaceholder")
+			expect(textareas).toHaveLength(1)
+			expect(textareas[0]).toHaveValue("Anthropic-profile text")
+		})
+
+		it("calls setApiConfigurationField with profileCustomInstructions on input", () => {
+			const mockSetApiConfigurationField = vi.fn()
+
+			renderApiOptions({
+				apiConfiguration: {},
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const textarea = screen.getByPlaceholderText("settings:providers.profileCustomInstructionsPlaceholder")
+			fireEvent.change(textarea, { target: { value: "New profile instructions" } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
+				"profileCustomInstructions",
+				"New profile instructions",
+			)
+		})
+
+		it("passes undefined to setApiConfigurationField when the textarea is cleared", () => {
+			const mockSetApiConfigurationField = vi.fn()
+
+			renderApiOptions({
+				apiConfiguration: { profileCustomInstructions: "Existing text" },
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const textarea = screen.getByPlaceholderText("settings:providers.profileCustomInstructionsPlaceholder")
+			fireEvent.change(textarea, { target: { value: "" } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("profileCustomInstructions", undefined)
+		})
+	})
 })
