@@ -1751,48 +1751,44 @@ capability defaults` to `webview-ui/.../useSelectedModel.spec.ts`. Commit
    default; static default used when no override configured). Commit `69ddb1656`.
 4. **Pre-existing test failure triage (document, not fix).** Four failure clusters
    investigated; all confirmed environment-induced, none are fork-introduced
-   regressions:
-    - **4a. `src/__tests__/dist_assets.spec.ts`** (dedicated `vitest.dist.config.ts`
-      lane): failed because the checked-in `src/dist` build artifact was stale --
-      `node_modules/tree-sitter-wasms@0.1.13` ships 36 `.wasm` files (Dart added by a
-      dependency bump, `a441e02bd`) but the on-disk `dist` only had 35 copied from
-      before that bump. `copyWasms()` (`packages/build/src/esbuild.ts`) copies every
-      `.wasm` it finds dynamically, so a plain rebuild (`pnpm --filter @roo-code/build
+   regressions: - **4a. `src/__tests__/dist_assets.spec.ts`** (dedicated `vitest.dist.config.ts`
+   lane): failed because the checked-in `src/dist` build artifact was stale --
+   `node_modules/tree-sitter-wasms@0.1.13` ships 36 `.wasm` files (Dart added by a
+   dependency bump, `a441e02bd`) but the on-disk `dist` only had 35 copied from
+   before that bump. `copyWasms()` (`packages/build/src/esbuild.ts`) copies every
+   `.wasm` it finds dynamically, so a plain rebuild (`pnpm --filter @roo-code/build
 build && node esbuild.mjs` from `src/`) fixed it with zero code change and zero
-      git impact (`dist` is gitignored). Build-order-dependent, not a regression.
-    - **4b. `src/services/rules/__tests__/rules.spec.ts`** (5 tests): fail with
-      `EPERM: operation not permitted, symlink...`. Root cause confirmed via registry
-      query (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock
+   git impact (`dist` is gitignored). Build-order-dependent, not a regression. - **4b. `src/services/rules/__tests__/rules.spec.ts`** (5 tests): fail with
+   `EPERM: operation not permitted, symlink...`. Root cause confirmed via registry
+   query (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock
 \AllowDevelopmentWithoutDevLicense` -- key absent) that Windows Developer Mode has
-      never been enabled on this host; `fs.symlink()` requires it (or
-      `SeCreateSymbolicLinkPrivilege`) on Windows. Sibling spec
-      `src/utils/__tests__/WorkspacePathResolver.spec.ts` demonstrates the correct
-      defensive pattern (probe-and-skip in `beforeEach`) that `rules.spec.ts` lacks --
-      worth adopting there in a future PR, but out of scope for this triage-only item.
-    - **4c (newly surfaced). `src/services/checkpoints/__tests__/
+   never been enabled on this host; `fs.symlink()` requires it (or
+   `SeCreateSymbolicLinkPrivilege`) on Windows. Sibling spec
+   `src/utils/__tests__/WorkspacePathResolver.spec.ts` demonstrates the correct
+   defensive pattern (probe-and-skip in `beforeEach`) that `rules.spec.ts` lacks --
+   worth adopting there in a future PR, but out of scope for this triage-only item. - **4c (newly surfaced). `src/services/checkpoints/__tests__/
 ShadowCheckpointService.spec.ts`**: 21 failures appeared in the full-suite run
-      (step 8c below) that were not part of the task's pre-identified list --
-      `EBUSY` on shadow-repo `rmdir`, multiple `Test timed out in 20000ms`, one `Hook
+   (step 8c below) that were not part of the task's pre-identified list --
+   `EBUSY` on shadow-repo `rmdir`, multiple `Test timed out in 20000ms`, one `Hook
 timed out in 20000ms`, and one `fatal: --local can only be used inside a git
 repository` from simple-git. Re-ran the file in isolation
-      (`npx vitest run services/checkpoints/__tests__/ShadowCheckpointService.spec.ts`):
-      **35/35 passed**, including the one that threw the simple-git error under
-      contention. Individual tests take 8-26s each in isolation (one legitimately
-      logged 20167ms, over the 20000ms timeout, yet still passed because the timeout
-      clock and the reported duration are not measured identically) -- this host's
-      git/fs subprocess latency is close enough to vitest's default 20s timeout that
-      any added contention from the other ~9000 tests in the full run tips individual
-      tests over the edge. Confirmed resource-contention/timeout flakiness, not a
-      regression; the fix (if ever pursued) is a per-test timeout bump in this spec,
-      not a logic change.
-    - **4d (newly surfaced). `webview-ui/src/components/settings/__tests__/
+   (`npx vitest run services/checkpoints/__tests__/ShadowCheckpointService.spec.ts`):
+   **35/35 passed**, including the one that threw the simple-git error under
+   contention. Individual tests take 8-26s each in isolation (one legitimately
+   logged 20167ms, over the 20000ms timeout, yet still passed because the timeout
+   clock and the reported duration are not measured identically) -- this host's
+   git/fs subprocess latency is close enough to vitest's default 20s timeout that
+   any added contention from the other ~9000 tests in the full run tips individual
+   tests over the edge. Confirmed resource-contention/timeout flakiness, not a
+   regression; the fix (if ever pursued) is a per-test timeout bump in this spec,
+   not a logic change. - **4d (newly surfaced). `webview-ui/src/components/settings/__tests__/
 SlashCommandsSettings.spec.tsx`**: 1 failure in the full-suite run (step 8d) --
-      `refreshes commands after creating new command` timed out a `waitFor(... ,
+   `refreshes commands after creating new command` timed out a `waitFor(... ,
 { timeout: 600 })` expecting `requestCommandsCalls.length >= 2`, got `1`. Re-ran
-      the file in isolation: **20/20 passed** in 7.92s. Same resource-contention
-      pattern as 4c, at an even tighter margin (600ms budget). Not a fork-introduced
-      regression; the file's git history (`02f790222`, `04ffb64bb`, `6cfa82f57`)
-      predates this branch entirely.
+   the file in isolation: **20/20 passed** in 7.92s. Same resource-contention
+   pattern as 4c, at an even tighter margin (600ms budget). Not a fork-introduced
+   regression; the file's git history (`02f790222`, `04ffb64bb`, `6cfa82f57`)
+   predates this branch entirely.
 5. **`progress.txt` origin check.** `git diff zoo/main:progress.txt progress.txt`
    produced no output -- byte-identical to the upstream `zoo/main` copy. This is
    upstream-tracked content (the Zoo Code team's own PR-cherry-pick log), not
@@ -1838,3 +1834,130 @@ tests past their configured timeouts; both pass cleanly in isolation.
   (4c, 4d) turned out to be timeout-margin flakiness that disappears outside the
   full-suite's resource contention -- isolating first avoids chasing a phantom
   regression and avoids wasting a fix attempt on a non-issue.
+
+## 19. Smoke test and install (staged)
+
+Re-baseline re-verified 2026-10-04 at `ff3c1d314` (`feature/zoo-base` tip). Dev-mode
+build-from-a-CLI-perspective readiness, a full production bundle, `dist_assets.spec.ts`
+(triage item 4a), and a `-fork.1` VSIX were all re-confirmed green -- see the task log
+for exact commands. This section is the handoff for the two remaining human steps:
+smoke-testing in the Extension Development Host (Stage 1), then installing the VSIX
+over the marketplace build (Stage 2). **Do not skip to Stage 2 before Stage 1 passes.**
+
+### STAGE 1 -- Developer mode (do this first)
+
+**How to launch:** open this repo in VS Code, then press **F5** (or **Run and Debug**
+panel > select "Run Extension" > the play button). `.vscode/launch.json` defines a
+single `extensionHost` launch config named "Run Extension" with
+`preLaunchTask: "${defaultBuildTask}"`, which resolves to the `watch` task in
+`.vscode/tasks.json` (the task with `"isDefault": true` under `group.kind: "build"`).
+That task fans out to three background watchers: `watch:webview` (`pnpm --filter
+@roo-code/vscode-webview dev`, a Vite dev server), `watch:bundle` (`npx turbo
+watch:bundle`, esbuild watch for `src/dist/extension.js`), and `watch:tsc` (`npx turbo
+watch:tsc`, type-checking only, does not block launch). F5 waits for the esbuild watcher's
+"problem matcher" to report ready, then launches a new **Extension Development Host**
+window with `--extensionDevelopmentPath=${workspaceFolder}/src`. This opens a _second,
+separate_ VS Code window running the fork build **alongside, not replacing**, Chris's
+normal VS Code windows and his installed marketplace Zoo Code extension -- the
+Development Host is its own `extensionHost` process with its own extension set; the
+marketplace extension is not loaded into it, and the marketplace extension's own window
+is entirely unaffected by anything done in the Dev Host.
+
+**Prerequisites confirmed from a build perspective (no UI launch performed):**
+
+- `pnpm install` must already be run at the repo root (standard monorepo bootstrap;
+  already satisfied in this checked-out tree).
+- The one-shot equivalent of the `watch:bundle` task
+  (`pnpm bundle`, i.e. `turbo bundle` -> `node esbuild.mjs` in `src/`) was run as part of
+  this task and completed with no errors, confirming the esbuild graph compiles cleanly.
+  F5's watch variant does the same compile, just incrementally and left running.
+- `watch:webview` starts a Vite dev server; `ClineProvider.getHMRHtmlContent()`
+  (`src/core/webview/ClineProvider.ts`) reads `src/.vite-port` to find its port and falls
+  back to probing `http://localhost:5173` if the file is missing, only when
+  `contextProxy.extensionMode === vscode.ExtensionMode.Development`. If the Vite dev
+  server is not running when the Dev Host activates the webview, HMR load fails and
+  `ClineProvider` falls back to `getHtmlContent()` (the static production-build HTML),
+  so a missing/slow webview watcher degrades gracefully to the static webview-ui build
+  rather than hard-failing the Dev Host launch.
+
+**Settings isolation -- VERIFIED claim, not assumed:** `--extensionDevelopmentPath`
+alone does **not** isolate `globalState`/`SecretStorage`/`globalStorageUri` from
+Chris's normal VS Code user data. `.vscode/launch.json`'s `args` is only
+`["--extensionDevelopmentPath=${workspaceFolder}/src"]` -- there is **no**
+`--user-data-dir` or `--profile` flag. VS Code's own default behaviour for an
+`extensionHost` launch config without one of those flags is to reuse the **same** user
+data directory as the host VS Code instance that launched it. Consequently:
+
+- `ContextProxy` (`src/core/config/ContextProxy.ts`) reads/writes `context.globalState`
+  and `context.secrets` scoped by **extension id** (`zoocodeorganization.zoo-code`),
+  not by window. Because both the Dev Host and Chris's normal VS Code share the same
+  user data dir _and_ the Dev Host loads the identical extension id, **global settings,
+  provider profiles (`ProviderSettingsManager`'s secrets-backed JSON blob), and secrets
+  (API keys) are the SAME store the marketplace extension uses** -- they are not
+  isolated. Any provider profile created/edited in the Dev Host is visible to, and
+  persists into, the marketplace extension's next activation, and vice versa.
+- This means Stage 1's Bedrock smoke tests will exercise (and potentially mutate) the
+  same AWS credentials/profiles Chris's daily-driver marketplace build already has
+  configured -- which is actually convenient for smoke-testing (no need to reconfigure
+  Bedrock from scratch), but Chris should be aware that **any provider-profile edits
+  made in the Dev Host are not sandboxed** and will show up in the marketplace
+  extension afterwards too.
+- If true isolation is ever wanted for a future test pass, add
+  `"args": ["--extensionDevelopmentPath=${workspaceFolder}/src", "--user-data-dir=${workspaceFolder}/.vscode/dev-user-data"]`
+  to `launch.json`; this was not added here since it was not requested and changing it
+  is an out-of-scope behavioural change for this task.
+
+**Smoke-test checklist (run inside the Dev Host, against a configured Bedrock
+profile):**
+
+| #   | Check                                                                                                               | One-line pass condition                                                                                                                                                                                                                                                                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T4  | Discovery dropdown populates + refresh                                                                              | Bedrock provider settings panel's model/target dropdown populates with discovered inference profiles/models for the configured region, and the "Refresh discovery" button re-fetches without error.                                                                                                                                       |
+| T11 | GPT-6 Sol selectable with reasoning-effort control and a successful request                                         | `openai.gpt-6-sol` appears in the discovered-target list (via its mandatory inference profile), the reasoning-effort control renders for it, and a sent message completes with a normal response.                                                                                                                                         |
+| T3  | Adaptive-thinking Claude model honours effort                                                                       | Select an adaptive-thinking Claude model (e.g. Sonnet 5 / Opus 4.7+), change the reasoning-effort slider, and confirm the request succeeds and the effort setting visibly affects behaviour (e.g. response latency/verbosity) or is reflected in the request as expected.                                                                 |
+| T6  | Max-tokens probe detects a cap                                                                                      | Click "Detect max output tokens" on a Bedrock model; the probe completes and populates a concrete numeric cap rather than erroring out.                                                                                                                                                                                                   |
+| T5  | Structured output default-on, no errors on a tool-heavy task                                                        | With the Bedrock structured-output toggle left at its default (on/unset), run a task that issues several tool calls in a row; no strict-schema rejection errors surface and tool calls parse correctly.                                                                                                                                   |
+| T7  | Per-profile instructions visible in system-prompt preview                                                           | Set profile-specific custom instructions on the active Bedrock profile, open the system prompt preview (Prompts view's "preview" / modes view system-prompt dialog), and confirm a distinct "Profile Instructions" section appears containing that text.                                                                                  |
+| T8  | `extractInlineThinking` renders collapsible reasoning on a `<think>`-emitting model                                 | Enable `extractInlineThinking` on a profile pointed at a model that emits `<think>`/`<thinking>`/`<reasoning>` tags in plain text; confirm the UI renders a collapsible reasoning block instead of showing the raw tags inline.                                                                                                           |
+| T9  | `textToolCallFallback` executes an XML-embedded tool call                                                           | Enable `textToolCallFallback` on a profile pointed at a model that cannot reliably emit native tool calls; prompt it to perform a tool action and confirm an XML-embedded tool call in the model's plain-text response is extracted and actually executed.                                                                                |
+| T10 | `allowTextOnlyResponses` pauses visibly on a text-only reply + soft-nudge timer fires with followup auto-approve on | Enable `allowTextOnlyResponses` and auto-approval of follow-up questions; prompt the model so it replies with plain text and no tool call; confirm the task pauses with a visible (non-error) follow-up state rather than a `noToolsUsed` retry, and that the soft-nudge auto-approval timer fires on its own after the configured delay. |
+| T1  | Unbound guard passive                                                                                               | With the Unbound provider configured, open its model list in normal operation; confirm no error/crash occurs (the `Array.isArray` guard in `unbound.ts` only engages defensively against a non-array API response, so a healthy pass is simply "nothing breaks").                                                                         |
+
+### STAGE 2 -- VSIX install (only after Stage 1 passes)
+
+**Install command + UI route:** either run
+`code --install-extension "bin\zoo-code-3.82.2-fork.1.vsix"` from a terminal (adjust the
+path/version to the actual built artifact), or in VS Code's normal window open the
+Extensions panel (`Ctrl+Shift+X`) > "..." menu (top-right) > **"Install from VSIX..."**
+
+> browse to `bin\zoo-code-3.82.2-fork.1.vsix`. Either route **replaces** the installed
+> marketplace build in place because both share extension id
+> `zoocodeorganization.zoo-code` -- this is the point of no return the task description
+> warns about; do this only after Stage 1 smoke-testing has passed.
+
+**MANDATORY auto-update pin:** immediately after installing, open the Extensions panel,
+find "Zoo Code", click its gear/settings icon, and select **"Auto Update" -> "Disable
+(Auto Update)"** for this extension specifically. If this is skipped, the next time the
+Zoo Code marketplace publisher ships a release, VS Code will silently auto-update over
+this fork build the next time the auto-update check runs (typically on startup or
+periodically in the background) -- with no prompt, overwriting the fork VSIX with the
+unmodified upstream marketplace build. Per-extension pinning is preferred because:
+
+- The global alternative, setting `"extensions.autoUpdate": false` in VS Code user
+  settings, disables auto-update for **every** installed extension, not just this one --
+  a much blunter instrument that silently also stops security/bugfix updates for
+  everything else Chris has installed, with no per-extension visibility into what's
+  pinned and why.
+- Another global alternative, `"extensions.autoUpdate": "onlyEnabledExtensions"`, is
+  closer but still extension-list-wide rather than a single explicit per-extension
+  pin, and is easy to forget is active repo-wide versus being a deliberate, visible
+  per-extension choice in the Extensions panel UI.
+- The per-extension gear-menu toggle is the only option that leaves an explicit,
+  visible, easily-reversible marker ("Auto Update: Disabled" badge) on this specific
+  extension, which is what makes it easy to remember this fork build is intentionally
+  pinned when revisiting this machine later.
+
+**Rollback:** open the Extensions panel, search "Zoo Code", click **"Uninstall"** on the
+fork build, then click **"Install"** on the marketplace listing (or simply click
+"Reload" if VS Code offers to restore the previously-installed marketplace version from
+cache) to return to the stock marketplace build.
