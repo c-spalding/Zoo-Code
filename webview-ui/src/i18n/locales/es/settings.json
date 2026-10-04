@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Recurrir a llamadas de herramientas basadas en texto",
 			"description": "Cuando está habilitado, si el modelo responde con texto plano en lugar de usar una llamada de herramienta nativa, Zoo escanea el texto buscando una llamada de herramienta en formato XML, Anthropic-invoke o JSON dentro de un bloque de código y la ejecuta. Útil para modelos sin soporte nativo de llamada de funciones (por ejemplo, muchos modelos de pesos abiertos servidos a través de Bedrock o servidores de inferencia locales). Los modelos que sí admiten llamadas de función nativas son instruidos para preferirlas, por lo que su comportamiento no cambia."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Permitir respuestas solo de texto",
+			"description": "Cuando está habilitado, si el modelo responde con texto plano sin ninguna llamada de herramienta (y no se encontró ninguna llamada de herramienta de respaldo), Zoo presenta el texto como una pregunta de seguimiento en lugar de mostrar un error de uso de herramienta. Si la aprobación automática y la aprobación automática de preguntas de seguimiento están ambas activadas, Zoo espera brevemente su respuesta y luego impulsa automáticamente al modelo a continuar. Cuando esta opción está desactivada, una respuesta solo de texto siempre se trata como un error, exactamente igual que antes."
 		}
 	},
 	"experimental": {

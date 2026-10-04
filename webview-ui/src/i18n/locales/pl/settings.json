@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Powrót do wywołań narzędzi opartych na tekście",
 			"description": "Po włączeniu, jeśli model odpowiada czystym tekstem zamiast używać natywnego wywołania narzędzia, Zoo skanuje tekst w poszukiwaniu wywołania narzędzia w formacie XML, Anthropic-invoke lub JSON w blokach kodu i wykonuje je. Przydatne dla modeli bez natywnego wsparcia wywołań funkcji (np. wiele modeli open-weight udostępnianych przez Bedrock lub lokalne serwery wnioskowania). Modele, które wspierają natywne wywołania funkcji, są instruowane, aby je preferować, więc ich zachowanie się nie zmienia."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Zezwól na odpowiedzi tylko tekstowe",
+			"description": "Po włączeniu, jeśli model odpowiada czystym tekstem bez wywołania narzędzia (i nie znaleziono żadnego zapasowego wywołania narzędzia), Zoo przedstawia tekst jako pytanie uzupełniające, zamiast wyświetlać błąd użycia narzędzia. Jeśli automatyczne zatwierdzanie i automatyczne zatwierdzanie pytań uzupełniających są włączone, Zoo czeka chwilę na odpowiedź, a następnie automatycznie zachęca model do kontynuowania. Gdy to ustawienie jest wyłączone, odpowiedź zawierająca tylko tekst jest zawsze traktowana jako błąd, tak jak dotychczas."
 		}
 	},
 	"experimental": {

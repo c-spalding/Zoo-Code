@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Metin tabanlı araç çağrılarına geri dön",
 			"description": "Etkinleştirildiğinde, model yerel bir araç çağrısı kullanmak yerine düz metinle yanıt verirse, Zoo metinde XML, Anthropic-invoke veya JSON kod bloğu biçiminde bir araç çağrısı arar ve bunu yürütür. Yerel fonksiyon çağırma desteği olmayan modeller için kullanışlıdır (örneğin, Bedrock veya yerel çıkarım sunucuları üzerinden sunulan birçok açık ağırlıklı model). Yerel fonksiyon çağırmayı destekleyen modellere bunu tercih etmeleri talimatı verilir, bu nedenle davranışları değişmez."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Yalnızca metin yanıtlarına izin ver",
+			"description": "Etkinleştirildiğinde, model araç çağrısı olmadan düz metinle yanıt verirse (ve yedek araç çağrısı bulunamazsa), Zoo bir araç kullanım hatası göstermek yerine metni bir takip sorusu olarak sunar. Otomatik onay ve takip sorularının otomatik onayı her ikisi de açıksa, Zoo yanıtınız için kısa bir süre bekler, ardından modeli devam etmesi için otomatik olarak dürter. Bu ayar kapalıyken, yalnızca metin içeren bir yanıt her zaman önceki gibi hata olarak değerlendirilir."
 		}
 	},
 	"experimental": {

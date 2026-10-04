@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Kembali ke panggilan alat berbasis teks",
 			"description": "Saat diaktifkan, jika model merespons dengan teks biasa alih-alih menggunakan panggilan alat native, Zoo memindai teks untuk panggilan alat berformat XML, Anthropic-invoke, atau JSON dalam blok kode berpagar dan mengeksekusinya. Berguna untuk model tanpa dukungan panggilan fungsi native (misalnya, banyak model open-weight yang disajikan melalui Bedrock atau server inferensi lokal). Model yang mendukung panggilan fungsi native diinstruksikan untuk memprioritaskannya, sehingga perilakunya tidak berubah."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Izinkan respons hanya teks",
+			"description": "Saat diaktifkan, jika model merespons dengan teks biasa tanpa panggilan alat (dan tidak ditemukan panggilan alat cadangan), Zoo menyajikan teks tersebut sebagai pertanyaan lanjutan daripada menampilkan error penggunaan alat. Jika persetujuan otomatis dan persetujuan otomatis pertanyaan lanjutan sama-sama aktif, Zoo menunggu sebentar untuk balasan Anda, lalu secara otomatis mendorong model untuk melanjutkan. Saat setelan ini nonaktif, respons hanya teks selalu diperlakukan sebagai error, persis seperti sebelumnya."
 		}
 	},
 	"experimental": {

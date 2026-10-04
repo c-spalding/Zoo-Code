@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Terugvallen op tekstgebaseerde tool-aanroepen",
 			"description": "Wanneer ingeschakeld, als het model reageert met platte tekst in plaats van een native tool-aanroep te gebruiken, scant Zoo de tekst op een XML-, Anthropic-invoke- of JSON-in-code-blok-tool-aanroep en voert deze uit. Nuttig voor modellen zonder ondersteuning voor native functie-aanroepen (bijv. veel open-weight modellen die worden aangeboden via Bedrock of lokale inferentieservers). Modellen die native functie-aanroepen wel ondersteunen, krijgen de instructie om deze te verkiezen, zodat hun gedrag ongewijzigd blijft."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Alleen-tekst-antwoorden toestaan",
+			"description": "Wanneer ingeschakeld, als het model reageert met platte tekst zonder tool-aanroep (en er geen fallback-tool-aanroep is gevonden), presenteert Zoo de tekst als een vervolgvraag in plaats van een tool-gebruiksfout te tonen. Als zowel automatische goedkeuring als automatische goedkeuring van vervolgvragen zijn ingeschakeld, wacht Zoo kort op uw antwoord en spoort het model vervolgens automatisch aan om door te gaan. Wanneer deze instelling is uitgeschakeld, wordt een alleen-tekst-antwoord altijd als fout behandeld, precies zoals voorheen."
 		}
 	},
 	"experimental": {

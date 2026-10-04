@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Dự phòng gọi công cụ dựa trên văn bản",
 			"description": "Khi được bật, nếu mô hình phản hồi bằng văn bản thuần thay vì sử dụng lệnh gọi công cụ gốc, Zoo sẽ quét văn bản để tìm lệnh gọi công cụ dạng XML, Anthropic-invoke, hoặc JSON trong khối mã và thực thi nó. Hữu ích cho các mô hình không có hỗ trợ gọi hàm gốc (ví dụ: nhiều mô hình trọng số mở được phục vụ qua Bedrock hoặc máy chủ suy luận cục bộ). Các mô hình có hỗ trợ gọi hàm gốc được hướng dẫn ưu tiên sử dụng nó, vì vậy hành vi của chúng không thay đổi."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Cho phép phản hồi chỉ bằng văn bản",
+			"description": "Khi được bật, nếu mô hình phản hồi bằng văn bản thuần mà không có lệnh gọi công cụ (và không tìm thấy lệnh gọi công cụ dự phòng), Zoo sẽ trình bày văn bản đó như một câu hỏi tiếp theo thay vì hiển thị lỗi sử dụng công cụ. Nếu cả phê duyệt tự động và phê duyệt tự động câu hỏi tiếp theo đều được bật, Zoo sẽ chờ một chút để nhận phản hồi của bạn, sau đó tự động thúc đẩy mô hình tiếp tục. Khi tắt tùy chọn này, phản hồi chỉ bằng văn bản luôn được coi là lỗi, giống hoàn toàn như trước đây."
 		}
 	},
 	"experimental": {

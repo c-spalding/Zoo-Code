@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Revenir aux appels d'outils basés sur le texte",
 			"description": "Lorsqu'activé, si le modèle répond en texte brut au lieu d'utiliser un appel d'outil natif, Zoo analyse le texte à la recherche d'un appel d'outil au format XML, Anthropic-invoke ou JSON dans un bloc de code et l'exécute. Utile pour les modèles sans prise en charge native des appels de fonction (par exemple, de nombreux modèles à poids ouverts servis via Bedrock ou des serveurs d'inférence locaux). Les modèles qui prennent en charge les appels de fonction natifs sont invités à les privilégier, donc leur comportement reste inchangé."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Autoriser les réponses en texte seul",
+			"description": "Lorsqu'activé, si le modèle répond en texte brut sans appel d'outil (et qu'aucun appel d'outil de secours n'a été trouvé), Zoo présente le texte comme une question de suivi au lieu d'afficher une erreur d'utilisation d'outil. Si l'approbation automatique et l'approbation automatique des questions de suivi sont toutes deux activées, Zoo attend brièvement votre réponse, puis relance automatiquement le modèle pour continuer. Lorsque ce paramètre est désactivé, une réponse en texte seul est toujours traitée comme une erreur, exactement comme avant."
 		}
 	},
 	"experimental": {

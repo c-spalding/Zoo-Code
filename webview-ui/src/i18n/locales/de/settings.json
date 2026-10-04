@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Auf textbasierte Tool-Aufrufe zurückgreifen",
 			"description": "Wenn aktiviert, durchsucht Zoo den Text nach einem XML-, Anthropic-Invoke- oder JSON-in-Codeblock-Tool-Aufruf und führt ihn aus, falls das Modell mit reinem Text antwortet, anstatt einen nativen Tool-Aufruf zu verwenden. Nützlich für Modelle ohne native Funktionsaufruf-Unterstützung (z. B. viele Open-Weight-Modelle über Bedrock oder lokale Inferenzserver). Modelle, die native Funktionsaufrufe unterstützen, werden angewiesen, diese zu bevorzugen, sodass sich ihr Verhalten nicht ändert."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Nur-Text-Antworten zulassen",
+			"description": "Wenn aktiviert und das Modell mit reinem Text ohne Tool-Aufruf antwortet (und kein Fallback-Tool-Aufruf gefunden wurde), stellt Zoo den Text als Folgefrage dar, anstatt einen Tool-Nutzungsfehler anzuzeigen. Wenn sowohl die automatische Genehmigung als auch die automatische Genehmigung von Folgefragen aktiviert sind, wartet Zoo kurz auf Ihre Antwort und fordert das Modell dann automatisch auf, fortzufahren. Wenn diese Einstellung deaktiviert ist, wird eine Nur-Text-Antwort immer als Fehler behandelt, genau wie zuvor."
 		}
 	},
 	"experimental": {
