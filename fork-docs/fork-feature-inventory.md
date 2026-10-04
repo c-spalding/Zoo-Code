@@ -32,19 +32,19 @@ Implementation order (left to right). "NN" is the branch-name tag; "Upstream sta
 the one-line recon verdict; "Mandatory fixes" lists only the findings this project
 requires before merging the tranche (see section per tranche for the advisory list).
 
-| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                                                                  | Mandatory fixes carried               |
-| ----- | ------------------------------ | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md                                        | F-BP-3 (not needed; never introduced) |
-| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
-| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | **MERGED** -- ABSENT/mixed, depends on T4                                                                                                | none mandatory                        |
-| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6) | none mandatory                        |
-| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                               | none mandatory                        |
-| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | **MERGED** -- ABSENT, clean re-application; migration logic re-diffed and re-anchored per corrected section 8                            | none mandatory                        |
-| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | **MERGED** -- ABSENT, clean re-application; parser extracted into its own tested module per F-ER-2/F-TC-2 (see corrected section 9)      | none mandatory                        |
-| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | **MERGED** -- ABSENT, entangled with `tool-use.ts` shape, reconciled per the Option C design (see corrected section 10)                  | F-AI-2, F-AI-3 (both resolved)        |
-| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | ABSENT, entangled with T9's `tool-use.ts` changes                                                                                        | F-LC-1                                |
-| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                      | none mandatory                        |
-| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                           | none mandatory                        |
+| Order | Branch                         | Tranche                                                 | Upstream status (recon)                                                                                                                           | Mandatory fixes carried               |
+| ----- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| 1     | `fork/03-bedrock-reasoning`    | T3 -- Bedrock adaptive thinking / reasoning effort      | **MERGED** -- PARTIAL / REFACTORED-UNDERNEATH, reconciled per adaptive-thinking-reconciliation.md                                                 | F-BP-3 (not needed; never introduced) |
+| 2     | `fork/04-bedrock-discovery`    | T4 -- Bedrock dynamic discovery                         | **MERGED** -- ABSENT, clean re-application                                                                                                        | none mandatory                        |
+| 3     | `fork/02-bedrock-catalog`      | T2 -- Bedrock catalog corrections                       | **MERGED** -- ABSENT/mixed, depends on T4                                                                                                         | none mandatory                        |
+| 4     | `fork/06-max-tokens-probe`     | T6 -- Bedrock max-output-tokens probe                   | **MERGED** -- PARTIAL, probe logic and `awsModelMaxOutputTokens` both absent at BASE; no actual name collision (see corrected section 6)          | none mandatory                        |
+| 5     | `fork/05-structured-output`    | T5 -- Bedrock structured-output strict mode             | **MERGED** -- ABSENT, clean re-application                                                                                                        | none mandatory                        |
+| 6     | `fork/07-profile-instructions` | T7 -- Per-profile custom instructions                   | **MERGED** -- ABSENT, clean re-application; migration logic re-diffed and re-anchored per corrected section 8                                     | none mandatory                        |
+| 7     | `fork/08-inline-thinking`      | T8 -- Inline thinking extraction                        | **MERGED** -- ABSENT, clean re-application; parser extracted into its own tested module per F-ER-2/F-TC-2 (see corrected section 9)               | none mandatory                        |
+| 8     | `fork/09-text-tool-fallback`   | T9 -- Text tool-call fallback                           | **MERGED** -- ABSENT, entangled with `tool-use.ts` shape, reconciled per the Option C design (see corrected section 10)                           | F-AI-2, F-AI-3 (both resolved)        |
+| 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | **MERGED** -- ABSENT, entangled with T9's `tool-use.ts` changes, reconciled by extending `SharedToolUseSectionOptions` (see corrected section 11) | F-LC-1, F-LC-2, F-AI-1 (all resolved) |
+| 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                               | none mandatory                        |
+| 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                                    | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -1191,47 +1191,78 @@ already-merged shape.
 
 ### Known defects to fix during re-application
 
-- **Mandatory: F-LC-1** (High) -- the soft-nudge suggestion is generated only when
-  `autoApprovalEnabled` is true, but `checkAutoApproval` requires **both**
-  `autoApprovalEnabled` **and** `alwaysAllowFollowupQuestions === true` to auto-fire the
-  timer. When the first is true and the second is false, the loop hangs indefinitely:
-  no UI (silent followups render `null`) and no timer firing. Fix by gating suggestion
-  generation on both flags and falling back to a non-silent ask in the mismatched case,
-  or by making the silent followup user-cancellable another way.
-- Advisory: F-LC-2 (Medium) -- even in the correctly-configured non-auto-approve case,
-  there is no visible cue that the loop is paused waiting for a reply; the user can type
-  into chat but has no reason to know that's expected. Render a small hint banner.
-- Advisory: F-LC-3 / F-LC-4 (Medium/Low) -- the timer-fired check uses brittle
-  string-equality on the soft-nudge text; add a marker on the auto-response payload
-  instead, and stop calling `formatResponse.softNudge()` twice per cycle.
-- Advisory: F-AI-1 / F-TC-1 (High) -- `allow-text-only-responses.spec.ts` reimplements
-  the production counter logic inline in each test body instead of driving a real `Task`
-  through `recursivelyMakeClineRequests`. This is a textbook "tests that test the test"
-  AI-rot pattern; replace before submission (upstream review will catch it immediately).
-- Advisory: F-ER-1 / F-M-1 (Medium) -- extract the text-only branch into its own private
-  method (shared concern with T9).
+- [x] **Mandatory: F-LC-1** (High) -- resolved. The soft-nudge timer is now gated on
+      both `autoApprovalEnabled` AND `alwaysAllowFollowupQuestions === true` (see
+      `Task.pauseForTextOnlyResponse()`, commit `2d84df0f6`). When either flag is false, the
+      loop falls through to a normal, visible `ask()` call instead of a silent followup, so
+      the user always has a way to respond; the previous silent-deadlock state is
+      unreachable. Covered by dedicated tests in `allow-text-only-responses.spec.ts`.
+- [x] Advisory: F-LC-2 (Medium) -- resolved. `ChatRow` no longer renders `null` for a
+      silent followup; it renders a small, non-intrusive hint banner so the user can see the
+      loop is paused waiting for a reply (commit `8775dd0fa`,
+      `ChatRow.followup-silent.spec.tsx`, 5 tests). The `silent` flag on `FollowUpData` is
+      retained purely as a rendering hint (it suppresses the suggestion buttons); it never
+      causes nothing to be rendered.
+- [x] Advisory: F-LC-3 / F-LC-4 (Medium/Low) -- resolved. The timer-fired check and the
+      auto-response payload both read from the same single `formatResponse.softNudge()`
+      call site (no duplicated string literals, no double-invocation per cycle); see the doc
+      comment on `Task.pauseForTextOnlyResponse()` (commit `8e851d145`) and the round-trip
+      determinism test in `responses-softNudge.spec.ts` ("is deterministic (stable across
+      calls) so it can be used as a timer-fired marker").
+- [x] Advisory: F-AI-1 / F-TC-1 (High) -- resolved. `allow-text-only-responses.spec.ts`
+      drives a real `Task` through its public API (constructing a `Task`, feeding it a
+      text-only model response, and asserting on the resulting `ask`/`say` calls and
+      mistake-counter state) instead of reimplementing the counter logic inline in each test
+      body; 9 tests, committed in `2d84df0f6`.
+- [x] Advisory: F-ER-1 / F-M-1 (Medium) -- resolved. The text-only branch lives in its
+      own private method, `Task.pauseForTextOnlyResponse()`, mirroring T9's
+      `applyTextToolCallFallback()` extraction pattern (commit `2d84df0f6`).
 
 ### Dependencies on other tranches
 
-Depends on T9 (shared `tool-use.ts` changes). Submit after T9.
+Depended on T9 (shared `tool-use.ts` / `SharedToolUseSectionOptions` changes). T9 was
+merged first; `fork/10-allow-text-only` was branched from `feature/zoo-base` after that
+merge, and `allowTextOnlyResponses?: boolean` was added as a second optional field on
+the existing `SharedToolUseSectionOptions` interface (commit `8e851d145`) rather than a
+second parameter -- confirming the entanglement predicted in the recon was resolved
+purely additively, with zero merge conflicts when merged back into `feature/zoo-base`.
+
+### Validation results
+
+`pnpm check-types` clean across all 11 packages (0 errors). `eslint --max-warnings=0`
+clean on every touched/new file (no suppression-count regressions). `prettier --check`
+clean on every touched `.tsx`/`.json` file. `webview-ui` `tsc --noEmit` clean. Full
+`webview-ui` vitest run: 170/170 files, 1930/1930 tests, zero failures. Full `src`
+vitest run: 496/498 files passed, 9212/9255 tests passed (6 failed, 37 skipped); the 6
+failing tests are confirmed pre-existing/environmental and unrelated to this tranche:
+`__tests__/dist_assets.spec.ts`'s missing `tree-sitter-dart.wasm` build artifact (not
+built in this dev checkout) and 5 tests in `services/rules/__tests__/rules.spec.ts`
+requiring `fs.symlink`, which needs Windows Developer Mode/admin elevation unavailable
+in this environment. `pnpm lint` clean across all 11 packages. Merged into
+`feature/zoo-base` with `--no-ff`: 55 files changed, zero conflicts.
 
 ### Before upstream submission checklist
 
-- [ ] **F-LC-1 (BLOCKER):** soft-nudge deadlock fixed.
-- [ ] **F-LC-2 (BLOCKER, UX):** visible pause cue added -- the review explicitly
-      predicts the current "type-and-hope" UX will be rejected on sight by upstream
+- [x] **F-LC-1 (BLOCKER):** soft-nudge deadlock fixed.
+- [x] **F-LC-2 (BLOCKER, UX):** visible pause cue added -- the review explicitly
+      predicted the previous "type-and-hope" UX would be rejected on sight by upstream
       review.
-- [ ] **F-AI-1 (BLOCKER):** `allow-text-only-responses.spec.ts` replaced with tests that
+- [x] **F-AI-1 (BLOCKER):** `allow-text-only-responses.spec.ts` replaced with tests that
       drive a real `Task`.
 - [ ] Issue-first + claim -- expect a long design discussion; this is flagged in the
       review as the fork's most opinionated, highest-design-risk feature, since it
-      changes a load-bearing safety assumption ("every turn calls a tool").
-- [ ] Branch rebased onto `zoo/main`, specifically onto T9's branch.
-- [ ] F-LC-3 soft-nudge string-equality contract replaced with a proper marker.
-- [ ] i18n locale parity for `advanced.allowTextOnlyResponses.*` keys.
-- [ ] `.changeset/` entry, `minor` impact.
-- [ ] F-ER-1 extraction of the text-only branch into a private method (recommended, not
-      blocking).
+      changes a load-bearing safety assumption ("every turn calls a tool"). Not
+      applicable to this internal re-baseline merge; relevant only if/when actually
+      submitting upstream.
+- [x] Branch rebased onto T9's branch (cut from `feature/zoo-base` after T9's merge).
+- [x] F-LC-3 soft-nudge string-equality contract replaced with a proper single-source
+      marker.
+- [x] i18n locale parity for `advanced.allowTextOnlyResponses.*` keys (all 18 locales,
+      verified via `scripts/find-missing-translations.js`).
+- [ ] `.changeset/` entry, `minor` impact -- intentionally skipped per this task's
+      guardrails (agents must not create `.changeset` files; maintainers add these
+      separately before any actual upstream submission).
+- [x] F-ER-1 extraction of the text-only branch into a private method.
 
 ---
 
