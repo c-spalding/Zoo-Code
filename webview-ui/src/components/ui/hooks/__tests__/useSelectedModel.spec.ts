@@ -819,6 +819,81 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-arn")
 			expect(result.current.info?.supportsImages).toBe(true)
 		})
+
+		// Regression guard (loose-ends item 1 / archive 3da7f1945): an unrecognised
+		// bedrock model id that is NOT the "custom-arn" sentinel and has NO awsCustomArn
+		// must NOT inherit the custom-ARN ON capability defaults above. It should fall
+		// through to the generic resolveBedrockModelInfo() -> guessBedrockModelInfoFromId()
+		// heuristic, which borrows the default model's shape but keeps supportsImages/
+		// supportsPromptCache OFF (and the user's id is preserved, not swapped to the
+		// default model's id).
+		it("should preserve an unrecognised non-ARN bedrock id and NOT apply custom-ARN capability defaults", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "some-unknown-model",
+				// Note: no awsCustomArn set, and apiModelId is not the "custom-arn" sentinel.
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// The id is PRESERVED as the user's id (not swapped to the default model's id).
+			expect(result.current.id).toBe("some-unknown-model")
+
+			// guessBedrockModelInfoFromId("some-unknown-model") matches no known family, so
+			// the fallback yields BEDROCK_MAX_TOKENS/BEDROCK_DEFAULT_CONTEXT with capabilities
+			// OFF -- proving the custom-ARN ON defaults did not leak into this path.
+			expect(result.current.info?.maxTokens).toBe(4096)
+			expect(result.current.info?.contextWindow).toBe(128_000)
+			expect(result.current.info?.supportsImages).toBe(false)
+			expect(result.current.info?.supportsPromptCache).toBe(false)
+		})
+	})
+
+	describe("bedrock provider with max-output-tokens override", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		// Loose-ends item 3 (T6 known-gap): the request-time path
+		// (AwsBedrockHandler.getModelById()) has always applied awsModelMaxOutputTokens via
+		// resolveBedrockModelInfo()'s maxOutputTokensOverride parameter, but the webview
+		// preview path (this hook) previously omitted it from the same call -- so the
+		// settings-UI preview showed the model's static default maxTokens even when the
+		// user had an empirically-detected/manually-entered cap configured. This asserts the
+		// preview now reflects the override, matching the request path.
+		it("should apply awsModelMaxOutputTokens as the preview's maxTokens, overriding the static default", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsModelMaxOutputTokens: 32_000,
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
+			// Static catalog default for this model is 8192 -- the override must win.
+			expect(result.current.info?.maxTokens).toBe(32_000)
+		})
+
+		it("should fall back to the static default maxTokens when no override is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.info?.maxTokens).toBe(8192)
+		})
 	})
 
 	describe("litellm provider", () => {
