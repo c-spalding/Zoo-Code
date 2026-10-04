@@ -819,6 +819,35 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("custom-arn")
 			expect(result.current.info?.supportsImages).toBe(true)
 		})
+
+		// Regression guard (loose-ends item 1 / archive 3da7f1945): an unrecognised
+		// bedrock model id that is NOT the "custom-arn" sentinel and has NO awsCustomArn
+		// must NOT inherit the custom-ARN ON capability defaults above. It should fall
+		// through to the generic resolveBedrockModelInfo() -> guessBedrockModelInfoFromId()
+		// heuristic, which borrows the default model's shape but keeps supportsImages/
+		// supportsPromptCache OFF (and the user's id is preserved, not swapped to the
+		// default model's id).
+		it("should preserve an unrecognised non-ARN bedrock id and NOT apply custom-ARN capability defaults", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "some-unknown-model",
+				// Note: no awsCustomArn set, and apiModelId is not the "custom-arn" sentinel.
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// The id is PRESERVED as the user's id (not swapped to the default model's id).
+			expect(result.current.id).toBe("some-unknown-model")
+
+			// guessBedrockModelInfoFromId("some-unknown-model") matches no known family, so
+			// the fallback yields BEDROCK_MAX_TOKENS/BEDROCK_DEFAULT_CONTEXT with capabilities
+			// OFF -- proving the custom-ARN ON defaults did not leak into this path.
+			expect(result.current.info?.maxTokens).toBe(4096)
+			expect(result.current.info?.contextWindow).toBe(128_000)
+			expect(result.current.info?.supportsImages).toBe(false)
+			expect(result.current.info?.supportsPromptCache).toBe(false)
+		})
 	})
 
 	describe("litellm provider", () => {
