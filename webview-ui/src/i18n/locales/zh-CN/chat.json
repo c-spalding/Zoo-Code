@@ -274,7 +274,8 @@
 		"goToSubtask": "查看任务"
 	},
 	"questions": {
-		"hasQuestion": "Zoo有一个问题"
+		"hasQuestion": "Zoo有一个问题",
+		"waitingForReply": "Zoo正在等待您的回复"
 	},
 	"taskCompleted": "任务完成",
 	"modelResponseIncomplete": "模型响应不完整",
@@ -338,7 +339,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "复制到输入框（或按住Shift点击）",
-		"timerPrefix": "自动批准已启用。{{seconds}}秒后选择中…"
+		"timerPrefix": "自动批准已启用。{{seconds}}秒后选择中…",
+		"silentPauseHint": "Zoo已暂停并正在等待您的输入。请输入消息以继续。"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} 已发布",

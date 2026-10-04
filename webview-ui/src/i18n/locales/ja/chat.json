@@ -273,7 +273,8 @@
 		"goToSubtask": "タスクを表示"
 	},
 	"questions": {
-		"hasQuestion": "Zooは質問があります"
+		"hasQuestion": "Zooは質問があります",
+		"waitingForReply": "Zooはあなたの返信を待っています"
 	},
 	"taskCompleted": "タスク完了",
 	"modelResponseIncomplete": "モデルの応答が不完全",
@@ -337,7 +338,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "入力欄にコピー（またはShift + クリック）",
-		"timerPrefix": "自動承認が有効です。{{seconds}}秒後に選択中…"
+		"timerPrefix": "自動承認が有効です。{{seconds}}秒後に選択中…",
+		"silentPauseHint": "Zooは一時停止し、入力をお待ちしています。続けるにはメッセージを入力してください。"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} リリース",

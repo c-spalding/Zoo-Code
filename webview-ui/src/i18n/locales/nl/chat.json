@@ -268,7 +268,8 @@
 		"goToSubtask": "Taak weergeven"
 	},
 	"questions": {
-		"hasQuestion": "Zoo heeft een vraag"
+		"hasQuestion": "Zoo heeft een vraag",
+		"waitingForReply": "Zoo wacht op je antwoord"
 	},
 	"taskCompleted": "Taak voltooid",
 	"error": "Fout",
@@ -353,7 +354,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Kopiëren naar invoer (zelfde als shift + klik)",
-		"timerPrefix": "Automatisch goedkeuren ingeschakeld. Selecteren in {{seconds}}s…"
+		"timerPrefix": "Automatisch goedkeuren ingeschakeld. Selecteren in {{seconds}}s…",
+		"silentPauseHint": "Zoo is gepauzeerd en wacht op jouw invoer. Typ een bericht om door te gaan."
 	},
 	"costs": {
 		"totalWithSubtasks": "Totale kosten (inclusief subtaken): ${{cost}}",

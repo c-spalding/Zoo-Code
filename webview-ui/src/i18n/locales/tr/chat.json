@@ -274,7 +274,8 @@
 		"goToSubtask": "Görevi görüntüle"
 	},
 	"questions": {
-		"hasQuestion": "Zoo'nun bir sorusu var"
+		"hasQuestion": "Zoo'nun bir sorusu var",
+		"waitingForReply": "Zoo senin yanıtını bekliyor"
 	},
 	"taskCompleted": "Görev Tamamlandı",
 	"modelResponseIncomplete": "Model yanıtı eksik",
@@ -338,7 +339,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Giriş alanına kopyala (veya Shift + tıklama)",
-		"timerPrefix": "Otomatik onay etkinleştirildi. {{seconds}}s içinde seçim yapılıyor…"
+		"timerPrefix": "Otomatik onay etkinleştirildi. {{seconds}}s içinde seçim yapılıyor…",
+		"silentPauseHint": "Zoo duraklatıldı ve girdini bekliyor. Devam etmek için bir mesaj yaz."
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} yayınlandı",
