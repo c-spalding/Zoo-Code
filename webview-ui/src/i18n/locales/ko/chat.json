@@ -273,7 +273,8 @@
 		"goToSubtask": "작업 보기"
 	},
 	"questions": {
-		"hasQuestion": "Zoo에게 질문이 있습니다"
+		"hasQuestion": "Zoo에게 질문이 있습니다",
+		"waitingForReply": "Zoo가 답변을 기다리고 있습니다"
 	},
 	"taskCompleted": "작업 완료",
 	"modelResponseIncomplete": "모델 응답 불완전",
@@ -337,7 +338,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "입력창에 복사 (또는 Shift + 클릭)",
-		"timerPrefix": "자동 승인 활성화됨. {{seconds}}초 후 선택 중…"
+		"timerPrefix": "자동 승인 활성화됨. {{seconds}}초 후 선택 중…",
+		"silentPauseHint": "Zoo가 일시 중지되었으며 입력을 기다리고 있습니다. 계속하려면 메시지를 입력하세요."
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} 출시",

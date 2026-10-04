@@ -274,7 +274,8 @@
 		"goToSubtask": "Xem nhiệm vụ"
 	},
 	"questions": {
-		"hasQuestion": "Zoo có một câu hỏi"
+		"hasQuestion": "Zoo có một câu hỏi",
+		"waitingForReply": "Zoo đang chờ phản hồi của bạn"
 	},
 	"taskCompleted": "Nhiệm vụ hoàn thành",
 	"modelResponseIncomplete": "Phản hồi của mô hình không đầy đủ",
@@ -338,7 +339,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Sao chép vào ô nhập liệu (hoặc Shift + nhấp chuột)",
-		"timerPrefix": "Phê duyệt tự động được bật. Chọn trong {{seconds}}s…"
+		"timerPrefix": "Phê duyệt tự động được bật. Chọn trong {{seconds}}s…",
+		"silentPauseHint": "Zoo đã tạm dừng và đang chờ bạn nhập. Nhập một tin nhắn để tiếp tục."
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} đã phát hành",

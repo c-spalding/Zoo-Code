@@ -75,4 +75,56 @@ describe("getSharedToolUseSection", () => {
 			)
 		})
 	})
+
+	// Fork tranche T10 (allowTextOnlyResponses). These guard the off-state
+	// byte-identity requirement: calling with no options, or with the flag
+	// explicitly false/undefined, must never change existing prompt output.
+	describe("allowTextOnlyResponses flag", () => {
+		const baseSection = getSharedToolUseSection()
+
+		it("produces byte-identical output when called with no options", () => {
+			expect(getSharedToolUseSection(undefined)).toBe(baseSection)
+		})
+
+		it("produces byte-identical output when allowTextOnlyResponses is false", () => {
+			expect(getSharedToolUseSection({ allowTextOnlyResponses: false })).toBe(baseSection)
+		})
+
+		it("produces byte-identical output when allowTextOnlyResponses is undefined", () => {
+			expect(getSharedToolUseSection({ allowTextOnlyResponses: undefined })).toBe(baseSection)
+		})
+
+		it("still requires a tool call per response when the flag is off", () => {
+			expect(baseSection).toContain("You must call at least one tool per assistant response")
+		})
+
+		it("relaxes the closing sentence when allowTextOnlyResponses is true", () => {
+			const section = getSharedToolUseSection({ allowTextOnlyResponses: true })
+
+			expect(section).toContain("you may respond with text alone")
+			expect(section).not.toContain("You must call at least one tool per assistant response")
+		})
+
+		it("keeps everything before the closing sentence identical to the off-state output", () => {
+			const onSection = getSharedToolUseSection({ allowTextOnlyResponses: true })
+			const offInsertionPoint = baseSection.indexOf("You must call at least one tool")
+			const onInsertionPoint = onSection.indexOf("Use tools when you need to take action")
+
+			expect(onInsertionPoint).toBeGreaterThan(-1)
+			expect(onSection.slice(0, onInsertionPoint)).toBe(baseSection.slice(0, offInsertionPoint))
+		})
+
+		it("still ends with the multiple-tools guidance when the flag is true", () => {
+			const section = getSharedToolUseSection({ allowTextOnlyResponses: true })
+
+			expect(section).toContain("Prefer calling as many tools as are reasonably needed")
+		})
+
+		it("composes with textToolCallFallback without altering either sentence", () => {
+			const section = getSharedToolUseSection({ textToolCallFallback: true, allowTextOnlyResponses: true })
+
+			expect(section).toContain("If you do not have native function-calling capability")
+			expect(section).toContain("you may respond with text alone")
+		})
+	})
 })

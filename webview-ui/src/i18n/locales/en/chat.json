@@ -315,7 +315,8 @@
 		"goToSubtask": "View task"
 	},
 	"questions": {
-		"hasQuestion": "Zoo has a question"
+		"hasQuestion": "Zoo has a question",
+		"waitingForReply": "Zoo is waiting for your reply"
 	},
 	"taskCompleted": "Task Completed",
 	"error": "Error",
@@ -380,7 +381,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Copy to input (same as shift + click)",
-		"timerPrefix": "Auto-approve enabled. Selecting in {{seconds}}s…"
+		"timerPrefix": "Auto-approve enabled. Selecting in {{seconds}}s…",
+		"silentPauseHint": "Zoo paused and is waiting for your input. Type a message to continue."
 	},
 	"costs": {
 		"totalWithSubtasks": "Total Cost (including subtasks): ${{cost}}",

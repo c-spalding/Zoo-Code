@@ -921,6 +921,10 @@
 		"textToolCallFallback": {
 			"label": "Ripiega su chiamate di strumenti basate su testo",
 			"description": "Quando abilitato, se il modello risponde con testo semplice invece di utilizzare una chiamata di strumento nativa, Zoo analizza il testo cercando una chiamata di strumento in formato XML, Anthropic-invoke o JSON in un blocco di codice e la esegue. Utile per modelli senza supporto nativo per le chiamate di funzione (ad esempio, molti modelli open-weight serviti tramite Bedrock o server di inferenza locali). I modelli che supportano le chiamate di funzione native sono istruiti a preferirle, quindi il loro comportamento rimane invariato."
+		},
+		"allowTextOnlyResponses": {
+			"label": "Consenti risposte solo testo",
+			"description": "Quando abilitato, se il modello risponde con testo semplice senza alcuna chiamata di strumento (e non è stata trovata nessuna chiamata di strumento di fallback), Zoo presenta il testo come una domanda di follow-up invece di mostrare un errore di utilizzo dello strumento. Se l'approvazione automatica e l'approvazione automatica delle domande di follow-up sono entrambe attive, Zoo attende brevemente la tua risposta, poi sollecita automaticamente il modello a continuare. Quando questa impostazione è disattivata, una risposta solo testo viene sempre trattata come un errore, esattamente come prima."
 		}
 	},
 	"experimental": {

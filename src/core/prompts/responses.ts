@@ -54,6 +54,16 @@ Otherwise, if you have not completed the task and do not need additional informa
 (This is an automated message, so do not respond to it conversationally.)`
 	},
 
+	// Fork tranche T10 (allowTextOnlyResponses). Sent on behalf of the user when a
+	// text-only, no-tool-use turn's implicit follow-up question auto-approval timer
+	// fires (both `alwaysAllowFollowupQuestions` and `autoApprovalEnabled` are on).
+	// Framed as guidance rather than an error, since the model did nothing wrong -
+	// no human was available to answer in time, so the task should simply proceed.
+	softNudge: () =>
+		`The user is not currently available to respond. Please proceed with the next step of the task using the appropriate tools, or call attempt_completion if you believe the task is finished.
+
+This is an automated message, so do not respond to it conversationally.`,
+
 	tooManyMistakes: (feedback?: string) =>
 		JSON.stringify({
 			status: "guidance",

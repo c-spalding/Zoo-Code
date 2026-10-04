@@ -10,6 +10,15 @@ export interface FollowUpData {
 	question?: string
 	/** Array of suggested answers that the user can select */
 	suggest?: Array<SuggestionItem>
+	/**
+	 * Fork tranche T10 (allowTextOnlyResponses): true when this follow-up ask
+	 * was generated implicitly from a text-only, no-tool-use pause rather than
+	 * a genuine ask_followup_question tool call. `question` is intentionally
+	 * blank in this case. The webview must still render a visible waiting cue
+	 * for a silent follow-up - never nothing - but should suppress the
+	 * (redundant, internal-only) suggestion button.
+	 */
+	silent?: boolean
 }
 
 /**
@@ -80,6 +89,7 @@ export const suggestionItemSchema = z.object({
 export const followUpDataSchema = z.object({
 	question: z.string().optional(),
 	suggest: z.array(suggestionItemSchema).optional(),
+	silent: z.boolean().optional(),
 })
 
 export type FollowUpDataType = z.infer<typeof followUpDataSchema>

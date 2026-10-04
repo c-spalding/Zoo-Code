@@ -269,7 +269,8 @@
 		"goToSubtask": "Просмотреть задачу"
 	},
 	"questions": {
-		"hasQuestion": "У Zoo есть вопрос"
+		"hasQuestion": "У Zoo есть вопрос",
+		"waitingForReply": "Zoo ждёт твой ответ"
 	},
 	"taskCompleted": "Задача завершена",
 	"error": "Ошибка",
@@ -354,7 +355,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Скопировать во ввод (то же, что shift + клик)",
-		"timerPrefix": "Автоматическое одобрение включено. Выбор через {{seconds}}s…"
+		"timerPrefix": "Автоматическое одобрение включено. Выбор через {{seconds}}s…",
+		"silentPauseHint": "Zoo приостановился и ждёт твой ввод. Введи сообщение, чтобы продолжить."
 	},
 	"costs": {
 		"totalWithSubtasks": "Общая стоимость (включая подзадачи): ${{cost}}",

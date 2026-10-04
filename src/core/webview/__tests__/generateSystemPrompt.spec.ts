@@ -514,6 +514,56 @@ describe("generateSystemPrompt preview parity", () => {
 		expect(direct).toContain("If you do not have native function-calling capability")
 	})
 
+	it("threads the active profile's allowTextOnlyResponses into the TOOL USE section identically to the direct SYSTEM_PROMPT call", async () => {
+		// Fork tranche T10: generateSystemPrompt must not omit
+		// allowTextOnlyResponses, or the preview would silently diverge from
+		// what the model actually received whenever a profile had the setting
+		// enabled. This asserts both paths render the SAME TOOL USE section.
+		getStateMock.mockResolvedValueOnce({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4o",
+				allowTextOnlyResponses: true,
+			},
+			customModePrompts: undefined,
+			customInstructions: undefined,
+			mcpEnabled: false,
+			experiments: {},
+			language: undefined,
+			enableSubfolderRules: false,
+			disabledTools: undefined,
+		})
+
+		const preview = await generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+
+		const direct = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			"code",
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			{}, // experiments
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			{ ...fullSettings, allowTextOnlyResponses: true }, // settings
+			undefined, // todoList
+			undefined, // modelId
+			undefined, // skillsManager
+			undefined, // disabledTools
+			fullModelInfo, // modelInfo
+		)
+
+		expect(extractSection(preview, "TOOL USE")).toEqual(extractSection(direct, "TOOL USE"))
+		// Both must actually contain the relaxed closing sentence, not merely
+		// agree while both omit it (which would pass trivially).
+		expect(preview).toContain("you may respond with text alone")
+		expect(direct).toContain("you may respond with text alone")
+	})
+
 	describe("preview metadata-fetch robustness", () => {
 		it("skips the metadata fetch silently when the handler has no ensureModelFetched", async () => {
 			// Providers without lazy model discovery legitimately lack

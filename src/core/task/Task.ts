@@ -37,6 +37,7 @@ import {
 	type ModelInfo,
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
+	type FollowUpData,
 	RooCodeEventName,
 	TelemetryEventName,
 	TaskStatus,
@@ -4231,18 +4232,45 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Increment consecutive no-tool-use counter
 						this.consecutiveNoToolUseCount++
 
-						// Only show error and count toward mistake limit after 2 consecutive failures
-						if (this.consecutiveNoToolUseCount >= 2) {
-							await this.say("error", "MODEL_NO_TOOLS_USED")
-							// Only count toward mistake limit after second consecutive failure
-							this.consecutiveMistakeCount++
-						}
+						// Fork tranche T10: when allowTextOnlyResponses is enabled for the
+						// active profile, present the model's text-only response as an
+						// implicit follow-up question instead of unconditionally erroring.
+						// See pauseForTextOnlyResponse's doc comment for how this avoids the
+						// archive's F-LC-1 deadlock and F-LC-2 invisible-pause defects.
+						if (this.apiConfiguration.allowTextOnlyResponses) {
+							const { blocks: pauseBlocks, wasTimeout } = await this.pauseForTextOnlyResponse()
 
-						// Use the task's locked protocol for consistent behavior
-						this.userMessageContent.push({
-							type: "text",
-							text: formatResponse.noToolsUsed(),
-						})
+							if (wasTimeout) {
+								// No human was available to answer before the auto-approval
+								// timer fired. Mirrors the off-state's "grace retry": the
+								// first occurrence never counts as a mistake, and only
+								// consecutive timeouts (2nd onward) accumulate toward
+								// consecutiveMistakeLimit.
+								if (this.consecutiveNoToolUseCount >= 2) {
+									this.consecutiveMistakeCount++
+								}
+							} else {
+								// A genuine human reply is a real course-correction, not a
+								// mistake pattern - reset both counters.
+								this.consecutiveNoToolUseCount = 0
+								this.consecutiveMistakeCount = 0
+							}
+
+							this.userMessageContent.push(...pauseBlocks)
+						} else {
+							// Only show error and count toward mistake limit after 2 consecutive failures
+							if (this.consecutiveNoToolUseCount >= 2) {
+								await this.say("error", "MODEL_NO_TOOLS_USED")
+								// Only count toward mistake limit after second consecutive failure
+								this.consecutiveMistakeCount++
+							}
+
+							// Use the task's locked protocol for consistent behavior
+							this.userMessageContent.push({
+								type: "text",
+								text: formatResponse.noToolsUsed(),
+							})
+						}
 					} else {
 						// Reset counter when tools are used successfully
 						this.consecutiveNoToolUseCount = 0
@@ -4542,6 +4570,87 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Fork tranche T10 (allowTextOnlyResponses): presents a model's text-only,
+	 * no-tool-use response as an implicit follow-up question instead of the
+	 * default `formatResponse.noToolsUsed()` error, reusing the existing
+	 * `ask("followup", ...)` auto-approval infrastructure. The payload shape
+	 * mirrors AskFollowupQuestionTool's real `ask_followup_question` call
+	 * exactly (see that file) so the webview and `checkAutoApproval` treat
+	 * this identically to a genuine tool-driven follow-up question.
+	 *
+	 * F-LC-1 (deadlock) fix: this method never decides for itself whether the
+	 * auto-approval timer should fire. It always supplies a usable suggestion
+	 * (`formatResponse.softNudge()`'s text) and lets `checkAutoApproval()`
+	 * (src/core/auto-approval/index.ts) make that decision from the SAME two
+	 * flags the webview's FollowUpSuggest countdown reads: `autoApprovalEnabled`
+	 * AND `alwaysAllowFollowupQuestions`. The archive's defect was a second,
+	 * independently-maintained gate in Task.ts that only checked
+	 * `autoApprovalEnabled` - by delegating entirely to the existing,
+	 * correctly-gated helper, that duplicate (and divergent) gate cannot exist
+	 * here: when only one of the two flags is on, `checkAutoApproval` returns
+	 * `{ decision: "ask" }`, so `ask()` blocks on a genuine, visible prompt
+	 * exactly like a real `ask_followup_question` call - never a silent timer.
+	 *
+	 * F-LC-2 (invisible pause) fix: the payload sets `silent: true` purely so
+	 * ChatRow can suppress the redundant internal-only suggestion button, but
+	 * the ask message itself is always added to `clineMessages` exactly like a
+	 * genuine `ask_followup_question` call, and ChatRow's followup case renders
+	 * a visible waiting cue whenever `silent` is set rather than returning
+	 * null. Nothing about this path can render as nothing while blocking - see
+	 * ChatRow.tsx's followup case and fork-feature-inventory.md T10.
+	 *
+	 * F-LC-3 (advisory): the only signal available at this call site for
+	 * distinguishing a timer-fired reply from a genuine human one is comparing
+	 * the returned text against the known soft-nudge text - `ask()` does not
+	 * surface which path produced its result. Rather than duplicating that
+	 * literal, both the payload's suggestion and the comparison below read
+	 * from the same `formatResponse.softNudge()` call, so there is exactly one
+	 * source of truth for the marker text (see responses-softNudge.spec.ts for
+	 * the round-trip determinism test).
+	 *
+	 * @returns `blocks`: the ContentBlockParam(s) to push onto
+	 *   `userMessageContent` for the next turn - either the human's reply
+	 *   (wrapped in the same `<user_message>` tag AskFollowupQuestionTool
+	 *   uses, plus any images) or the soft-nudge guidance text.
+	 *   `wasTimeout`: true when the auto-approval timer fired (no human
+	 *   replied in time), false for a genuine human reply - the caller uses
+	 *   this to apply the correct mistake-counter semantics (grace retry vs.
+	 *   full reset).
+	 */
+	private async pauseForTextOnlyResponse(): Promise<{
+		blocks: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
+		wasTimeout: boolean
+	}> {
+		const softNudgeText = formatResponse.softNudge()
+
+		const payload: FollowUpData = {
+			question: "",
+			silent: true,
+			suggest: [{ answer: softNudgeText }],
+		}
+
+		const { text, images } = await this.ask("followup", JSON.stringify(payload), false)
+
+		if (text === softNudgeText) {
+			return { blocks: [{ type: "text", text: softNudgeText }], wasTimeout: true }
+		}
+
+		// A genuine human reply: mirror AskFollowupQuestionTool's handling so
+		// the reply is visible in the transcript exactly like a real
+		// ask_followup_question response.
+		const safeText = text ?? ""
+		await this.say("user_feedback", safeText, images)
+
+		return {
+			blocks: [
+				{ type: "text", text: `<user_message>\n${safeText}\n</user_message>` },
+				...formatResponse.imageBlocks(images),
+			],
+			wasTimeout: false,
+		}
+	}
+
+	/**
 	 * Builds the SYSTEM_PROMPT from the caller's provider-state snapshot. This
 	 * method never reads provider state itself: callers that also construct
 	 * runtime tools for the same request (attemptApiRequest, condenseContext,
@@ -4632,6 +4741,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// "Show System Prompt" never drifts from what the model actually
 					// receives (see fork-docs/fork-feature-inventory.md T9 defect F-AI-3).
 					textToolCallFallback: apiConfiguration?.textToolCallFallback,
+					// Fork tranche T10: mirrors the preview path (generateSystemPrompt.ts) so
+					// the TOOL USE section's closing sentence matches what the model
+					// actually receives when allowTextOnlyResponses is enabled.
+					allowTextOnlyResponses: apiConfiguration?.allowTextOnlyResponses,
 				},
 				undefined, // todoList
 				this.api.getModel().id,

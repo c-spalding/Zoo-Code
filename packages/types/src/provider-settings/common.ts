@@ -44,6 +44,19 @@ export const baseProviderSettingsShape = {
 	// native function-calling are instructed to prefer it, so their behaviour is
 	// unchanged. Defaults to off so existing system-prompt output is unaffected.
 	textToolCallFallback: z.boolean().optional(),
+
+	// When true, if the model responds with text only (no native tool call) AND
+	// T9's textToolCallFallback extraction (if enabled) found nothing to extract,
+	// the text is presented to the user as an implicit follow-up question instead
+	// of being rejected with the "noToolsUsed" error. This lets models pause for
+	// human input (e.g. to ask a clarifying question) without being forced to call
+	// a tool first. Reuses the existing followup auto-approval infrastructure: when
+	// both `alwaysAllowFollowupQuestions` and `autoApprovalEnabled` are on, a timer
+	// automatically sends a soft-nudge message after `followupAutoApproveTimeoutMs`;
+	// otherwise the UI shows a visible waiting state until the user replies.
+	// Defaults to off so existing no-tool-use behaviour (immediate retry with the
+	// noToolsUsed error) is unaffected.
+	allowTextOnlyResponses: z.boolean().optional(),
 }
 
 export const apiModelIdProviderModelShape = {

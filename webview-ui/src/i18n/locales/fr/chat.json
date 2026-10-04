@@ -273,7 +273,8 @@
 		"goToSubtask": "Afficher la tâche"
 	},
 	"questions": {
-		"hasQuestion": "Zoo a une question"
+		"hasQuestion": "Zoo a une question",
+		"waitingForReply": "Zoo attend ta réponse"
 	},
 	"taskCompleted": "Tâche terminée",
 	"modelResponseIncomplete": "Réponse du modèle incomplète",
@@ -337,7 +338,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "Copier vers l'entrée (ou Shift + clic)",
-		"timerPrefix": "Approbation automatique activée. Sélection dans {{seconds}}s…"
+		"timerPrefix": "Approbation automatique activée. Sélection dans {{seconds}}s…",
+		"silentPauseHint": "Zoo a mis en pause et attend ta saisie. Tape un message pour continuer."
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} est disponible",

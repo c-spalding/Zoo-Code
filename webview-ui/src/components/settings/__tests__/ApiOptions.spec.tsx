@@ -206,6 +206,22 @@ vi.mock("../TextToolCallFallbackSettingsControl", () => ({
 	),
 }))
 
+// Mock AllowTextOnlyResponsesSettingsControl for tests
+vi.mock("../AllowTextOnlyResponsesSettingsControl", () => ({
+	AllowTextOnlyResponsesSettingsControl: ({ allowTextOnlyResponses, onChange }: any) => (
+		<div data-testid="allow-text-only-responses-settings-control">
+			<label>
+				Allow text-only responses
+				<input
+					type="checkbox"
+					checked={allowTextOnlyResponses}
+					onChange={(e) => onChange("allowTextOnlyResponses", e.target.checked)}
+				/>
+			</label>
+		</div>
+	),
+}))
+
 // Mock ThinkingBudget component
 vi.mock("../ThinkingBudget", () => ({
 	ThinkingBudget: ({ modelInfo, apiConfiguration, setApiConfigurationField }: any) => {

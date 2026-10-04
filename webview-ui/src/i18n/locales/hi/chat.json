@@ -273,7 +273,8 @@
 		"goToSubtask": "कार्य देखें"
 	},
 	"questions": {
-		"hasQuestion": "Zoo का एक प्रश्न है"
+		"hasQuestion": "Zoo का एक प्रश्न है",
+		"waitingForReply": "Zoo आपके जवाब का इंतज़ार कर रहा है"
 	},
 	"taskCompleted": "कार्य पूरा हुआ",
 	"modelResponseIncomplete": "मॉडल प्रतिक्रिया अपूर्ण",
@@ -337,7 +338,8 @@
 	},
 	"followUpSuggest": {
 		"copyToInput": "इनपुट में कॉपी करें (या Shift + क्लिक)",
-		"timerPrefix": "ऑटो-अनुमोदन सक्षम है। {{seconds}}s में चयन किया जा रहा है…"
+		"timerPrefix": "ऑटो-अनुमोदन सक्षम है। {{seconds}}s में चयन किया जा रहा है…",
+		"silentPauseHint": "Zoo रुक गया है और आपके इनपुट का इंतज़ार कर रहा है। जारी रखने के लिए एक संदेश टाइप करें।"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} रिलीज़ हो गया",
