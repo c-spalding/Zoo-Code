@@ -1719,3 +1719,122 @@ post-install.
   shims legitimately reference optional/fallback paths that need not exist); executing a
   shim directly (`--version`) is a more reliable staleness signal than parsing its
   contents.
+
+## 18. Loose ends + full validation 2026-10-04
+
+Branch `fork/12-loose-ends` cut from `feature/zoo-base` tip `32457454e`, merged back
+with `--no-ff` as `3ab2d753a`. Ten numbered items from the task brief; outcomes below.
+
+### Item-by-item outcomes
+
+1. **Custom-ARN capability defaults (archive `1cada2dcc` + `3da7f1945` regression
+   check).** T4's rework already carries the fix: the early-return path in
+   `resolveBedrockModelInfo` (`packages/types/src/providers/bedrock.ts`) hardcodes
+   `supportsPromptCache`/`supportsImages` ON for recognised custom ARNs before the
+   generic resolver runs. The only real gap was a missing regression test guarding
+   against the fix silently regressing for an unrecognised non-ARN id. Added
+   `should preserve an unrecognised non-ARN bedrock id and NOT apply custom-ARN
+capability defaults` to `webview-ui/.../useSelectedModel.spec.ts`. Commit
+   `a3cb302bc`.
+2. **pnpm config location (archive `a144dfa0b`).** pnpm 10 ignores the `pnpm` key in
+   root `package.json`; moved `onlyBuiltDependencies` and `overrides` to top-level keys
+   in `pnpm-workspace.yaml`. Verified `rg.exe` resolves and runs **before and after**
+   the move (`ripgrep 15.0.0`), confirming the `onlyBuiltDependencies` allowlist still
+   gates `@vscode/ripgrep`'s postinstall correctly from the new location. Spot-checked
+   `pnpm why esbuild`/`zod`/`csstype` to confirm `overrides` still resolve. Lockfile
+   unchanged (confirmed no regeneration triggered). Commit `dee212e14`.
+3. **useSelectedModel preview gap (T6 known gap).** The Bedrock branch of
+   `getSelectedModel` was not threading `awsModelMaxOutputTokens` through to
+   `resolveBedrockModelInfo` as `maxOutputTokensOverride`, unlike the backend's
+   `AwsBedrockHandler.getModelById()`. Added the missing parameter and two tests
+   ("bedrock provider with max-output-tokens override": override wins over static
+   default; static default used when no override configured). Commit `69ddb1656`.
+4. **Pre-existing test failure triage (document, not fix).** Four failure clusters
+   investigated; all confirmed environment-induced, none are fork-introduced
+   regressions:
+    - **4a. `src/__tests__/dist_assets.spec.ts`** (dedicated `vitest.dist.config.ts`
+      lane): failed because the checked-in `src/dist` build artifact was stale --
+      `node_modules/tree-sitter-wasms@0.1.13` ships 36 `.wasm` files (Dart added by a
+      dependency bump, `a441e02bd`) but the on-disk `dist` only had 35 copied from
+      before that bump. `copyWasms()` (`packages/build/src/esbuild.ts`) copies every
+      `.wasm` it finds dynamically, so a plain rebuild (`pnpm --filter @roo-code/build
+build && node esbuild.mjs` from `src/`) fixed it with zero code change and zero
+      git impact (`dist` is gitignored). Build-order-dependent, not a regression.
+    - **4b. `src/services/rules/__tests__/rules.spec.ts`** (5 tests): fail with
+      `EPERM: operation not permitted, symlink...`. Root cause confirmed via registry
+      query (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock
+\AllowDevelopmentWithoutDevLicense` -- key absent) that Windows Developer Mode has
+      never been enabled on this host; `fs.symlink()` requires it (or
+      `SeCreateSymbolicLinkPrivilege`) on Windows. Sibling spec
+      `src/utils/__tests__/WorkspacePathResolver.spec.ts` demonstrates the correct
+      defensive pattern (probe-and-skip in `beforeEach`) that `rules.spec.ts` lacks --
+      worth adopting there in a future PR, but out of scope for this triage-only item.
+    - **4c (newly surfaced). `src/services/checkpoints/__tests__/
+ShadowCheckpointService.spec.ts`**: 21 failures appeared in the full-suite run
+      (step 8c below) that were not part of the task's pre-identified list --
+      `EBUSY` on shadow-repo `rmdir`, multiple `Test timed out in 20000ms`, one `Hook
+timed out in 20000ms`, and one `fatal: --local can only be used inside a git
+repository` from simple-git. Re-ran the file in isolation
+      (`npx vitest run services/checkpoints/__tests__/ShadowCheckpointService.spec.ts`):
+      **35/35 passed**, including the one that threw the simple-git error under
+      contention. Individual tests take 8-26s each in isolation (one legitimately
+      logged 20167ms, over the 20000ms timeout, yet still passed because the timeout
+      clock and the reported duration are not measured identically) -- this host's
+      git/fs subprocess latency is close enough to vitest's default 20s timeout that
+      any added contention from the other ~9000 tests in the full run tips individual
+      tests over the edge. Confirmed resource-contention/timeout flakiness, not a
+      regression; the fix (if ever pursued) is a per-test timeout bump in this spec,
+      not a logic change.
+    - **4d (newly surfaced). `webview-ui/src/components/settings/__tests__/
+SlashCommandsSettings.spec.tsx`**: 1 failure in the full-suite run (step 8d) --
+      `refreshes commands after creating new command` timed out a `waitFor(... ,
+{ timeout: 600 })` expecting `requestCommandsCalls.length >= 2`, got `1`. Re-ran
+      the file in isolation: **20/20 passed** in 7.92s. Same resource-contention
+      pattern as 4c, at an even tighter margin (600ms budget). Not a fork-introduced
+      regression; the file's git history (`02f790222`, `04ffb64bb`, `6cfa82f57`)
+      predates this branch entirely.
+5. **`progress.txt` origin check.** `git diff zoo/main:progress.txt progress.txt`
+   produced no output -- byte-identical to the upstream `zoo/main` copy. This is
+   upstream-tracked content (the Zoo Code team's own PR-cherry-pick log), not
+   fork-local scratch. Left as-is per the task's conditional instruction.
+6. **`.tmp-recon/` directory.** `Test-Path .tmp-recon` returned `False`. Confirmed
+   absent; no action needed.
+
+### Full validation matrix (step 8, run on `feature/zoo-base` post-merge, tip
+
+`3ab2d753a`)
+
+| Check                                              | Result                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check-types` (root, 11 packages via turbo)   | 11/11 successful                                                                                                                                                                                                                                                                                            |
+| `pnpm lint` (root, 11 packages via turbo)          | 11/11 successful                                                                                                                                                                                                                                                                                            |
+| `cd src && npx vitest run` (full backend suite)    | 496 passed / 2 failed / 3 skipped test files (501); **9192 passed / 26 failed / 37 skipped tests** (9255). Both failing files triaged above: `rules.spec.ts` (4b, pre-existing/expected) and `ShadowCheckpointService.spec.ts` (4c, newly surfaced but confirmed flaky-under-load, 35/35 pass in isolation) |
+| `cd webview-ui && npx vitest run` (full suite)     | 169 passed / 1 failed test files (170); **1932 passed / 1 failed tests** (1933). Failing file triaged above (4d, 20/20 pass in isolation)                                                                                                                                                                   |
+| `cd packages/types && npx vitest run` (full suite) | **33/33 test files passed, 470/470 tests passed**, 0 failures                                                                                                                                                                                                                                               |
+| `pnpm knip --include files`                        | Excellent, Knip found no issues                                                                                                                                                                                                                                                                             |
+
+No fork-introduced regressions found anywhere in the matrix. The two newly surfaced
+flaky suites (4c, 4d) share a single root cause: this host's test-runner throughput
+under full-suite load pushes individual slow (git-subprocess- or `waitFor`-bound)
+tests past their configured timeouts; both pass cleanly in isolation.
+
+### Process observations for the playbook
+
+- A full `cd src && npx vitest run` on this host takes ~15.5 minutes (930s) for ~9255
+  tests across 501 files; `webview-ui`'s full suite takes ~8 minutes (473s) for ~1933
+  tests across 170 files. Budget accordingly when planning a full-validation pass --
+  do not assume these commands return in the same timeframe as a single-file run.
+- When a long-running `vitest run` command reports "still running" from the command
+  tool, polling with a trivial placeholder command (e.g. `echo "waiting..."`) is the
+  correct way to keep retrieving the terminal's accumulated output without
+  interrupting the background process. A benign tool-wrapper error ("DCG evaluation
+  timed out") can appear on the polling call itself while still successfully
+  returning the terminal's new output -- this is a framework quirk, not a real
+  failure, and should not be treated as a reason to abort or retry the underlying
+  long-running command.
+- When a full-suite run surfaces failures beyond an already-documented triage list,
+  the correct diagnostic step is re-running the specific failing file in isolation
+  before concluding it is a regression. Both newly surfaced failures in this pass
+  (4c, 4d) turned out to be timeout-margin flakiness that disappears outside the
+  full-suite's resource contention -- isolating first avoids chasing a phantom
+  regression and avoids wasting a fix attempt on a non-issue.
