@@ -259,6 +259,11 @@ function getSelectedModel({
 				targetId,
 				optIn1MContext: apiConfiguration.awsBedrock1MContext,
 				contextWindowOverride: apiConfiguration.awsModelContextWindow,
+				// Mirrors the request-time path (AwsBedrockHandler.getModelById()), which
+				// applies this same override. Without it, the settings-UI preview ignores
+				// a detected/manually-entered max-output-tokens cap even though the actual
+				// request honours it (loose-ends item 3 / T6 known-gap).
+				maxOutputTokensOverride: apiConfiguration.awsModelMaxOutputTokens,
 			})
 
 			const displayId = apiConfiguration.apiModelId ?? resolved.baseModelId

@@ -850,6 +850,52 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("bedrock provider with max-output-tokens override", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		// Loose-ends item 3 (T6 known-gap): the request-time path
+		// (AwsBedrockHandler.getModelById()) has always applied awsModelMaxOutputTokens via
+		// resolveBedrockModelInfo()'s maxOutputTokensOverride parameter, but the webview
+		// preview path (this hook) previously omitted it from the same call -- so the
+		// settings-UI preview showed the model's static default maxTokens even when the
+		// user had an empirically-detected/manually-entered cap configured. This asserts the
+		// preview now reflects the override, matching the request path.
+		it("should apply awsModelMaxOutputTokens as the preview's maxTokens, overriding the static default", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsModelMaxOutputTokens: 32_000,
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("anthropic.claude-3-5-sonnet-20241022-v2:0")
+			// Static catalog default for this model is 8192 -- the override must win.
+			expect(result.current.info?.maxTokens).toBe(32_000)
+		})
+
+		it("should fall back to the static default maxTokens when no override is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.info?.maxTokens).toBe(8192)
+		})
+	})
+
 	describe("litellm provider", () => {
 		beforeEach(() => {
 			mockUseOpenRouterModelProviders.mockReturnValue({
