@@ -333,4 +333,89 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			expect(textChunks[0].text).toBe("Hello from API key auth")
 		})
 	})
+
+	describe("D8 (smoke-test-triage.md): max_tokens stop reason", () => {
+		// Regression test for the token-burning retry loop Chris observed: previously
+		// a messageStop with stopReason "max_tokens" was silently swallowed (bedrock.ts
+		// just `continue`d), so a truncated response looked identical to a normal
+		// completion. The fix yields a visible text marker WITHOUT throwing, so Task.ts's
+		// streamTerminatedByProvider retry path (which only fires on a thrown error) is
+		// never triggered and the identical prompt is never re-sent.
+		it("yields a visible truncation marker and completes without throwing when stopReason is max_tokens", async () => {
+			handler = new AwsBedrockHandler({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsRegion: "us-east-1",
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield {
+						contentBlockStart: {
+							start: { text: "Partial answer" },
+							contentBlockIndex: 0,
+						},
+					}
+					yield {
+						contentBlockDelta: {
+							delta: { text: " that got cut off" },
+						},
+					}
+					yield { messageStop: { stopReason: "max_tokens" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			// Must not throw - the generator should drain to completion normally.
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			// The normal text deltas plus the appended truncation marker.
+			expect(textChunks.length).toBeGreaterThanOrEqual(2)
+			const markerChunk = textChunks[textChunks.length - 1]
+			expect(markerChunk.text).toContain("truncated")
+			expect(markerChunk.text.toLowerCase()).toContain("max")
+		})
+
+		it("does NOT yield a truncation marker for a normal end_turn stop reason", async () => {
+			handler = new AwsBedrockHandler({
+				apiProvider: providerIdentifiers.bedrock,
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsRegion: "us-east-1",
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield {
+						contentBlockStart: {
+							start: { text: "Complete answer." },
+							contentBlockIndex: 0,
+						},
+					}
+					yield { messageStop: { stopReason: "end_turn" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toBe("Complete answer.")
+		})
+	})
 })
