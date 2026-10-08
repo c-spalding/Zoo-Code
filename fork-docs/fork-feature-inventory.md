@@ -45,6 +45,7 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 9     | `fork/10-allow-text-only`      | T10 -- `allowTextOnlyResponses`                         | **MERGED** -- ABSENT, entangled with T9's `tool-use.ts` changes, reconciled by extending `SharedToolUseSectionOptions` (see corrected section 11) | F-LC-1, F-LC-2, F-AI-1 (all resolved) |
 | 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                               | none mandatory                        |
 | 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                                    | none mandatory                        |
+| 12    | `fork/14-payload-fixes`        | Smoke-test fixes, Tranche A (D4, D5, D6, D8)            | N/A -- fork-only defect fixes found during Stage 1 smoke-testing, see `plans/smoke-test-triage.md`                                                | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -1956,6 +1957,139 @@ unmodified upstream marketplace build. Per-extension pinning is preferred becaus
   visible, easily-reversible marker ("Auto Update: Disabled" badge) on this specific
   extension, which is what makes it easy to remember this fork build is intentionally
   pinned when revisiting this machine later.
+
+## 20. Smoke-test fixes
+
+Root-cause analysis for the Stage 1 smoke-test defects (D1-D8) lives in
+`plans/smoke-test-triage.md` (ground truth: `archive/zoo-base-3.56` read via `git show`;
+line numbers verified against `feature/zoo-base` HEAD at triage time). That document's
+fix specification was split into three tranches by risk/blast-radius; this section
+tracks tranche A, which is backend/catalog-only and fully unit-testable. Tranches B
+(webview-ui parity: D1, D2, D3, D6-UI) and C (profile-clone semantics: D7) are explicitly
+out of scope for this section and have NOT been implemented.
+
+### Tranche A -- payload fixes (D4, D5, D6, D8)
+
+**Status: MERGED** into `feature/zoo-base`. Branch: `fork/14-payload-fixes`, tip commit
+`a8411483a`.
+
+**D4 -- temperature sent to models that reject it (packages/types/src/providers/bedrock.ts,
+src/api/providers/bedrock.ts):**
+
+- Root cause: `guessBedrockModelInfoFromId`'s fallback for unknown ids (and the
+  sonnet-4-5 default entry it spreads over) has no `supportsTemperature` opinion, so an
+  unlisted `openai.gpt-*` id silently got a sampled `temperature` in the Converse
+  payload; separately, the `moonshotai.kimi-k3` catalog entry was simply missing the
+  flag outright.
+- Fix: added `isBedrockOpenAiFamily(baseModelId)` (matches `openai.gpt-*`, excludes
+  `openai.gpt-oss-*`, which do accept temperature) and
+  `isBedrockMoonshotFamily(baseModelId)` (matches `moonshotai.*` only -- deliberately
+  NOT the sibling `moonshot.` prefix, whose temperature contract is unverified).
+  `resolveBedrockModelInfo` applies `supportsTemperature: false` for either family when
+  the catalog/guess path left the flag `undefined`, so every current AND future unknown
+  id in these families is covered automatically, not just ids with a catalog entry.
+  `moonshotai.kimi-k3`'s catalog entry also now sets the flag explicitly so it's
+  self-describing. `createMessage`/`completePrompt` in `src/api/providers/bedrock.ts`
+  already gated on `info.supportsTemperature === false` universally -- no wiring changes
+  were needed there, confirming the triage's "fix the info, not the consumption point"
+  recommendation.
+
+**D5 -- GPT-6.1 Sol reports a 128K context window instead of its real cap:**
+
+- Live-verified against AWS Bedrock (profile `bedrock`, region `us-east-1`,
+  2026-10-07) via `aws bedrock list-foundation-models` / `get-foundation-model` and
+  direct `ConverseCommand` probes run from this task, per the triage's explicit
+  "verify or ask, do not guess ids" instruction. Findings:
+    - `openai.gpt-6.1-sol` is the **only** 6.1-family id AWS currently lists -- no
+      Terra/Luna/Astra 6.1 siblings exist yet.
+    - `maxTokens`: 131_072 is the exact AWS-confirmed cap (probing above it returns "The
+      maximum tokens you requested exceeds the model limit of 131072").
+    - `contextWindow`: 1_000_000, corroborating Chris's direct observation -- confirmed
+      empirically by bisecting large filler prompts (~896K tokens accepted, ~1.0-1.05M
+      rejected with "Your input exceeds the context window of this model").
+    - `supportsTemperature: false` -- confirmed ("This model doesn't support the
+      temperature field").
+    - Reasoning effort uses the nested `additionalModelRequestFields.reasoning.effort`
+      shape (same as GPT-6 Sol/Luna, not the flat field), allow-list
+      `low/medium/high/xhigh/max`.
+    - Unlike GPT-6 Sol/Luna, this model **rejects** `effort: "none"` ("Unsupported value:
+      'none' is not supported with the 'us.openai.gpt-6.1-sol' model").
+    - Pricing is unpublished by AWS as of this re-baseline; left unset rather than guessed.
+- Fix: added the `openai.gpt-6.1-sol` catalog entry with the verified values above, and
+  added it to `BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS` (bare id invocation is
+  rejected -- "Invocation of model ID ... with on-demand throughput isn't supported") and
+  `BEDROCK_GLOBAL_INFERENCE_MODEL_IDS` (`global.` prefix verified working).
+  `supportsReasoningEffort` / `BEDROCK_OPENAI_EFFORT_MODEL_IDS` membership was
+  **deliberately deferred**: the existing explicit-disable code path in
+  `src/api/providers/bedrock.ts` hard-codes `effort: "none"` for every
+  `BEDROCK_OPENAI_EFFORT_MODEL_IDS` member when reasoning is turned off, and this model
+  rejects that exact value. Wiring it in today, without first teaching that code path a
+  per-model exception, would send an invalid payload the moment a user disables
+  reasoning. Follow-up work should add that exception before enabling effort for this
+  id.
+
+**D6 -- Kimi K3 "maximum tokens exceeds the model limit of 128000":**
+
+- Root cause: catalog `maxTokens: 131_072` (borrowed from a non-Bedrock Moonshot entry,
+  never verified against AWS) exceeded the real 128_000 cap AWS enforces for K3 on
+  Bedrock, and no request-path clamp existed to catch a similarly-oversized
+  `modelMaxTokens` slider value or stale per-profile override (feeding into D7).
+- Fix: corrected the catalog entry to `maxTokens: 128_000` citing the AWS validation
+  error as evidence, per the triage's exact recommendation. Added a clamp inside
+  `resolveBedrockModelInfo` (the single source of truth shared by the runtime,
+  discovery, and webview preview) that caps a request-time `modelMaxTokens` override at
+  the higher of the static catalog cap or an empirically-probed
+  `maxOutputTokensOverride`. This preserves the T6 probe-override semantic exactly as
+  specified: a probe result is proof AWS accepts that higher value, so it is never
+  clamped down to the catalog figure, while a stale/oversized slider value can never
+  exceed what the model actually accepts.
+
+**D8 -- "Output token limit reached" / silent max_tokens truncation
+(src/api/providers/bedrock.ts stream handler, ~line 1113):**
+
+- Root cause: a `messageStop` event with `stopReason: "max_tokens"` was silently
+  `continue`d, so a response truncated at the configured output-token cap looked
+  identical to a normal completion -- no error, no visible indicator. The installed
+  marketplace build (3.86.0, not yet resynced into this fork) throws a dedicated
+  `OutputTokenLimitError` for the same condition, which `Task.ts`'s
+  `streamTerminatedByProvider` retry path catches and uses to re-send the identical
+  prompt when auto-approval is enabled -- burning tokens in a loop on an over-thinking
+  model, which is what Chris observed.
+- Fix: implemented the triage's minimal, upstream-collision-aware recommendation.
+  `max_tokens` stopReason now yields a visible `text` chunk noting the output was
+  truncated at the configured limit, WITHOUT throwing, so the turn ends normally and
+  `Task.ts`'s retry path (which only engages on a thrown error) is never triggered. A
+  comment flags that upstream 3.86's `OutputTokenLimitError` covers the same stopReason
+  and this branch must be reconciled with it at the next resync rather than letting both
+  mechanisms coexist.
+
+**Tests added (all passing):**
+
+- `packages/types/src/providers/__tests__/bedrock-catalog.spec.ts`: new "Tranche A"
+  describe blocks -- family-predicate unit tests, D4 resolution tests (unknown
+  `openai.gpt-6.1-sol-style` id, prefixed `us./global.`/`:1m` variants, `moonshotai.kimi-k3`
+  prefixed variants, `gpt-oss-*` unaffected, unknown non-family ids unaffected), D5
+  catalog-entry assertions, D6 clamp tests (below-cap honoured, above-cap clamped,
+  probe-sourced-above-catalog honoured, both-present interaction).
+- `packages/types/src/__tests__/bedrock-t11-models.test.ts`: updated the two
+  pre-existing assertions that encoded the now-corrected K3 `maxTokens` value and the
+  now-seven-plus-one `BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS` membership (the
+  test now asserts "contains at least" the original seven rather than an exact set, so
+  D5's addition doesn't collide with T11's invariant).
+- `src/api/providers/__tests__/bedrock.spec.ts`: new "Tranche A" describe block --
+  `createMessage` AND `completePrompt` payload-level checks that temperature is omitted
+  for the unknown GPT id and for `us.moonshotai.kimi-k3`, that `openai.gpt-oss-120b-1:0`
+  is unaffected, and that K3's actual request `maxTokens` is capped/overridden correctly
+  under all four override combinations.
+- `src/api/providers/__tests__/bedrock-reasoning.spec.ts`: new D8 tests -- a
+  `messageStop` with `stopReason: "max_tokens"` yields the truncation marker and the
+  generator completes without throwing; a normal `end_turn` stop does not emit the
+  marker.
+
+**Validation:** `pnpm check-types` clean; all 278 bedrock-related tests across
+`packages/types` and `src` pass; `eslint` clean on every touched file with no
+suppression-count increase (`src/eslint-suppressions.json` `api/providers/bedrock.ts`
+entry unchanged at 34). `webview-ui` was not touched (tranche B scope).
 
 **Rollback:** open the Extensions panel, search "Zoo Code", click **"Uninstall"** on the
 fork build, then click **"Install"** on the marketplace listing (or simply click
