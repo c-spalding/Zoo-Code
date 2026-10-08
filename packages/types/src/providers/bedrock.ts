@@ -635,6 +635,61 @@ export const bedrockModels = {
 		description:
 			"GPT-6 Luna on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand.",
 	},
+	// D5 (smoke-test-triage.md): live-verified against AWS Bedrock (profile "bedrock",
+	// region us-east-1, 2026-10-07) via `aws bedrock list-foundation-models` /
+	// `get-foundation-model` and direct ConverseCommand probes. As of this re-baseline,
+	// "openai.gpt-6.1-sol" is the ONLY 6.1-family id AWS lists - no Terra/Luna/Astra
+	// 6.1 siblings exist yet; do not add them speculatively.
+	"openai.gpt-6.1-sol": {
+		// maxTokens: VERIFIED exactly, not estimated - probing above the cap returned
+		// AWS's own validation error: "The maximum tokens you requested exceeds the
+		// model limit of 131072. Try again with a maximum tokens value that is lower
+		// than 131072." 131_072 itself was accepted.
+		maxTokens: 131_072,
+		// contextWindow: Chris directly observed this model reporting a 1M context
+		// window; corroborated empirically here (ConverseCommand with large filler
+		// prompts): ~896K input tokens succeeded, ~1.0-1.05M failed with
+		// "Your input exceeds the context window of this model" - consistent with a
+		// 1_000_000 contextWindow. The exact boundary within that range was not probed
+		// further to avoid unnecessary live-AWS spend once the order of magnitude was
+		// confirmed.
+		contextWindow: 1_000_000,
+		// supportsImages: VERIFIED directly from `get-foundation-model`
+		// (inputModalities: ["TEXT", "IMAGE"]).
+		supportsImages: true,
+		// supportsPromptCache: false, following the rest of the GPT-5.6/6 family (AWS
+		// documents prompt caching as Responses-API-only for this vendor on Bedrock) -
+		// inherited from the family pattern, not individually re-verified for 6.1 Sol.
+		supportsPromptCache: false,
+		// supportsTemperature: false - VERIFIED: Converse rejected `temperature` with
+		// "This model doesn't support the temperature field. Remove temperature and
+		// try again." Also covered independently by isBedrockOpenAiFamily() for any
+		// future unknown GPT id, but set explicitly here so this entry is
+		// self-describing.
+		supportsTemperature: false,
+		// Reasoning effort: VERIFIED the nested additionalModelRequestFields -
+		// { reasoning: { effort } } shape is accepted (same shape as GPT-6 Sol/Luna,
+		// NOT the flat `reasoning_effort` field, which 400s with
+		// `ValidationException: Unknown parameter: 'reasoning_effort'`) and the
+		// allow-list is low/medium/high/xhigh/max. UNLIKE GPT-6 Sol/Luna, 'none' is
+		// explicitly REJECTED here: "Unsupported value: 'none' is not supported with
+		// the 'us.openai.gpt-6.1-sol' model." BEDROCK_OPENAI_EFFORT_MODEL_IDS's
+		// existing explicit-disable code path (src/api/providers/bedrock.ts,
+		// createMessage AND completePrompt) hard-codes "none" as the disable value for
+		// every member of that list, so adding this id there today would send an
+		// invalid payload the moment reasoning is turned off. Deferring
+		// supportsReasoningEffort / BEDROCK_OPENAI_EFFORT_MODEL_IDS membership to a
+		// follow-up change that teaches the disable path a per-model "no-none"
+		// exception - do NOT add either without that fix landing first (effort
+		// metadata intentionally left off per the "unverified contract" guardrail,
+		// even though the shape/allow-list themselves ARE verified above).
+		// Pricing: UNVERIFIED - AWS's public Bedrock pricing page does not list 6.1
+		// Sol as of this re-baseline, and list/get-foundation-model expose no price
+		// data. Left unset rather than guessed; cost estimates read as unknown until
+		// AWS publishes a rate.
+		description:
+			"GPT-6.1 Sol on Amazon Bedrock (Converse). Requires an inference profile (us./global.) - the base model id is not invokable on-demand. Live-verified 2026-10-07 (see smoke-test-triage.md D5): accepts nested reasoning.effort (not flat reasoning_effort) with allow-list low/medium/high/xhigh/max (no 'none'); rejects temperature.",
+	},
 	"meta.llama3-3-70b-instruct-v1:0": {
 		maxTokens: 8192,
 		contextWindow: 128_000,
@@ -797,12 +852,25 @@ export const bedrockModels = {
 	// risks a 400 (research Q1/section 2b) - omitted until AWS documents a
 	// Converse-specific contract for it.
 	"moonshotai.kimi-k3": {
-		// maxTokens unverified - borrowed from upstream non-Bedrock moonshot.ts
-		// kimi-k3 entry; the AWS model card is silent on max output tokens.
-		maxTokens: 131_072,
+		// maxTokens corrected from the empirically-wrong 131_072 (borrowed from
+		// upstream non-Bedrock moonshot.ts) to 128_000, per live AWS error (D6,
+		// smoke-test-triage.md): "The maximum tokens you requested exceeds the
+		// model limit of 128000. Try again with a maximum tokens value that is
+		// lower than 128000." Also see the resolveBedrockModelInfo clamp below,
+		// which protects a stale slider/UI override from exceeding this cap
+		// while still letting an empirically-probed (awsModelMaxOutputTokens)
+		// value raise it, since a probe result is proof the higher value works.
+		maxTokens: 128_000,
 		contextWindow: 1_048_576,
 		supportsImages: true,
 		supportsPromptCache: true, // implicit caching only; no API restriction documented for it
+		// D4b (smoke-test-triage.md): AWS Converse rejects the `temperature`
+		// field for K3 the same way it does for the whole GPT-5.6/6 family.
+		// Explicit here (in addition to the isBedrockMoonshotFamily() guess-path
+		// predicate below) so the catalog entry is self-describing even for
+		// code paths that look the entry up directly without going through
+		// resolveBedrockModelInfo's family-predicate fallback.
+		supportsTemperature: false,
 		inputPrice: 3.0, // Global CRIS
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75, // 30-min explicit-caching write rate (Responses/Chat Completions only; unused on Converse)
@@ -945,6 +1013,10 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"openai.gpt-6-astra",
 	"openai.gpt-6-sol",
 	"openai.gpt-6-luna",
+	// D5 (smoke-test-triage.md): live-verified 2026-10-07 - `global.openai.gpt-6.1-sol`
+	// successfully invoked; the bare id is rejected ("Invocation of model ID
+	// openai.gpt-6.1-sol with on-demand throughput isn't supported").
+	"openai.gpt-6.1-sol",
 	"moonshotai.kimi-k3",
 ] as const
 
@@ -1026,6 +1098,10 @@ export const BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS = [
 	"openai.gpt-6-astra",
 	"openai.gpt-6-sol",
 	"openai.gpt-6-luna",
+	// D5 (smoke-test-triage.md): live-verified 2026-10-07, same mandatory-profile
+	// contract as the rest of the GPT-5.6/6 family (see BEDROCK_GLOBAL_INFERENCE_MODEL_IDS
+	// above for the exact error text confirming the bare id is rejected).
+	"openai.gpt-6.1-sol",
 	"moonshotai.kimi-k3",
 ] as const
 
@@ -1409,11 +1485,42 @@ export const guessBedrockModelInfoFromId = (modelId: string): Partial<ModelInfo>
 }
 
 /**
+ * D4a (smoke-test-triage.md): true for every OpenAI GPT family id on Bedrock
+ * EXCEPT the gpt-oss-* models, which DO accept the `temperature` field today
+ * (openai.gpt-oss-20b-1:0 / openai.gpt-oss-120b-1:0 have no supportsTemperature
+ * override in the catalog, i.e. the ModelInfo default of "supported" applies).
+ * Operates on an already-parsed base id (see {@link parseBedrockBaseModelId}),
+ * so it is robust to cross-region/global prefixes and the synthetic `:1m`
+ * suffix by construction - callers must pass a parsed id, not a raw target id.
+ */
+export const isBedrockOpenAiFamily = (baseModelId: string): boolean =>
+	baseModelId.startsWith("openai.gpt-") && !baseModelId.startsWith("openai.gpt-oss")
+
+/**
+ * D4b (smoke-test-triage.md): true for Moonshot's "moonshotai." vendor prefix
+ * (e.g. moonshotai.kimi-k3). Deliberately does NOT match the sibling
+ * "moonshot." prefix (moonshot.kimi-k2-thinking) - AWS publishes the two Kimi
+ * generations under genuinely different vendor prefixes on Bedrock (confirmed
+ * empirically, see bedrock-catalog.spec.ts), and kimi-k2-thinking already
+ * carries its own explicit `supportsTemperature` the catalog entry defines (it
+ * has none set, i.e. defaults to supported) - unlike K3, there is no live
+ * confirmation that kimi-k2-thinking rejects temperature, so it must not be
+ * swept in by a broader "moonshot" predicate. If K2-thinking's temperature
+ * contract is later verified to also reject the field, widen this predicate
+ * (or add a second one) at that time - do not guess now.
+ */
+export const isBedrockMoonshotFamily = (baseModelId: string): boolean => baseModelId.startsWith("moonshotai.")
+
+/**
  * Resolves the effective {@link ModelInfo} for a Bedrock invocation target, applying (in
- * order): the static catalog entry (or the heuristic fallback for unknown ids), the 1M
- * context-window/pricing tier when applicable, a static max-output-tokens override (e.g. a
- * future empirically-probed cap), and finally the request-time `modelMaxTokens` slider value
- * (which always wins, so users can still request fewer tokens than the model's headroom).
+ * order): the static catalog entry (or the heuristic fallback for unknown ids), a
+ * family-predicate `supportsTemperature: false` correction for ids the guess path can't
+ * know about (D4a/D4b), the 1M context-window/pricing tier when applicable, a static
+ * max-output-tokens override (e.g. an empirically-probed cap) clamped against a stale
+ * request-time override, and finally the request-time `modelMaxTokens` slider value
+ * (which wins over the catalog cap for lowering, but is itself clamped to the higher of
+ * the catalog cap or the probe-confirmed cap so it cannot exceed what the model actually
+ * accepts - see D6 in smoke-test-triage.md).
  *
  * This is the single source of truth shared by `AwsBedrockHandler.getModelById()` (runtime),
  * `discoverBedrockTargets` (extension-side discovery), and `useSelectedModel` (webview), so
@@ -1449,6 +1556,23 @@ export const resolveBedrockModelInfo = ({
 					...guessBedrockModelInfoFromId(resolvedBaseModelId),
 				}
 
+	// D4a/D4b (smoke-test-triage.md): the guess path (and the sonnet-4-5 default entry it
+	// spreads over for unknown ids) has no way to know a brand-new OpenAI or Moonshot id
+	// rejects `temperature` until the catalog is updated. Apply the family-level correction
+	// here, in resolution, so it covers EVERY unknown id in these families automatically -
+	// not just the ones with a catalog entry. Only fires when the catalog/guess didn't
+	// already set an explicit value, so a real catalog entry always wins.
+	if (
+		baseInfo.supportsTemperature === undefined &&
+		(isBedrockOpenAiFamily(resolvedBaseModelId) || isBedrockMoonshotFamily(resolvedBaseModelId))
+	) {
+		baseInfo.supportsTemperature = false
+	}
+
+	// Captured before any override mutates info.maxTokens below - this is the model's
+	// documented/guessed cap, used as the clamp ceiling for a stale `modelMaxTokens` slider.
+	const catalogMaxTokens = baseInfo.maxTokens
+
 	const oneMillionContext = shouldUseBedrock1MContext({
 		targetId,
 		baseModelId: resolvedBaseModelId,
@@ -1470,12 +1594,24 @@ export const resolveBedrockModelInfo = ({
 
 	// Apply the static-cap override BEFORE the request-time `modelMaxTokens` so users can
 	// explicitly request fewer tokens than the model's headroom (e.g. cost control) without
-	// having the override silently clobber their slider value.
-	if (maxOutputTokensOverride && maxOutputTokensOverride > 0) {
+	// having the override silently clobber their slider value. A probe-derived override is
+	// an empirically-proven cap (AWS actually accepted it), so it may legitimately exceed
+	// the static catalog value - it is NEVER clamped against `catalogMaxTokens`.
+	const hasProbeOverride = !!maxOutputTokensOverride && maxOutputTokensOverride > 0
+	if (hasProbeOverride) {
 		info.maxTokens = maxOutputTokensOverride
 	}
+
+	// D6 (smoke-test-triage.md): a user-entered `modelMaxTokens` slider value (or a stale
+	// override carried over from a different model, see D7) must not be allowed to exceed
+	// what the model actually accepts. Clamp it to the higher of the static catalog cap or
+	// the probe-confirmed cap - the probe result is proof AWS accepts that higher value, so
+	// it must still win over the catalog figure when both are present.
 	if (modelMaxTokens && modelMaxTokens > 0) {
-		info.maxTokens = modelMaxTokens
+		const clampCeiling = hasProbeOverride
+			? Math.max(catalogMaxTokens ?? 0, maxOutputTokensOverride as number)
+			: catalogMaxTokens
+		info.maxTokens = clampCeiling && clampCeiling > 0 ? Math.min(modelMaxTokens, clampCeiling) : modelMaxTokens
 	}
 	if (contextWindowOverride && contextWindowOverride > 0) {
 		info.contextWindow = contextWindowOverride

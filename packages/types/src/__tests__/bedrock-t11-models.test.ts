@@ -173,10 +173,18 @@ describe("T11 Bedrock catalog entries", () => {
 		it("matches the Bedrock-specific K3 contract: no preserveReasoning, no supportsReasoningEffort", () => {
 			const info = bedrockModels["moonshotai.kimi-k3"]
 			expect(info).toMatchObject({
-				maxTokens: 131_072,
+				// D6 (smoke-test-triage.md, fork/14-payload-fixes): corrected from the
+				// empirically-wrong 131_072 to 128_000 after AWS's own Converse error
+				// confirmed the real cap: "The maximum tokens you requested exceeds the
+				// model limit of 128000."
+				maxTokens: 128_000,
 				contextWindow: 1_048_576,
 				supportsImages: true,
 				supportsPromptCache: true,
+				// D4b (smoke-test-triage.md, fork/14-payload-fixes): K3 rejects the
+				// `temperature` field on Converse, same as the rest of the GPT-5.6/6
+				// family it shares a mandatory-inference-profile contract with.
+				supportsTemperature: false,
 				inputPrice: 3.0,
 				outputPrice: 15.0,
 				cacheWritesPrice: 3.75,
@@ -200,8 +208,11 @@ describe("T11 Bedrock catalog entries", () => {
 	})
 
 	describe("BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS", () => {
-		it("contains exactly the seven new T11 model ids, no more and no fewer", () => {
-			expect([...BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS].sort()).toEqual([...T11_MODEL_IDS].sort())
+		it("contains at least the seven T11 model ids (later tranches, e.g. D5's openai.gpt-6.1-sol, may add more)", () => {
+			const ids = BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS as readonly string[]
+			for (const id of T11_MODEL_IDS) {
+				expect(ids).toContain(id)
+			}
 		})
 
 		it("every listed id exists as a bedrockModels catalog entry", () => {

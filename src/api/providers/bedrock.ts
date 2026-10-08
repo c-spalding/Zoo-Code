@@ -1111,6 +1111,22 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 				// Handle message stop
 				if (streamEvent.messageStop) {
+					// D8 (smoke-test-triage.md): previously this stopReason was silently
+					// dropped, so a response truncated at the configured token limit
+					// looked identical to a normal completion. Task.ts only re-sends the
+					// prompt on a THROWN error (see Task.ts's streamTerminatedByProvider
+					// retry path), so emitting a visible marker here - rather than
+					// throwing - avoids the token-burning re-send loop Chris observed
+					// while still surfacing the truncation to the user. Upstream 3.86.0
+					// introduces a dedicated OutputTokenLimitError for this same
+					// stopReason; reconcile this branch with that class at the next
+					// resync rather than letting both mechanisms coexist.
+					if (streamEvent.messageStop.stopReason === "max_tokens") {
+						yield {
+							type: "text",
+							text: "\n\n[Response truncated: the model reached its configured maximum output token limit before finishing. Increase Max Output Tokens in the model settings to get a complete response.]",
+						}
+					}
 					continue
 				}
 			}

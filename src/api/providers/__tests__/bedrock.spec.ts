@@ -3096,4 +3096,162 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 	})
+
+	describe("Tranche A (smoke-test-triage.md): D4/D6 payload regression tests", () => {
+		type MinimalCommandArg = { inferenceConfig?: { temperature?: number; maxTokens?: number } }
+
+		beforeEach(() => {
+			mockConverseStreamCommand.mockReset()
+		})
+
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+		it("D4a: createMessage omits temperature for an unknown openai.gpt-6.1-sol-style id (guess path)", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6.1-sol-style-unknown-variant",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("D4a: completePrompt omits temperature for an unknown openai.gpt-6.1-sol-style id (guess path, non-stream)", async () => {
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+			const handler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-6.1-sol-style-unknown-variant",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("D4b: createMessage omits temperature for the prefixed us.moonshotai.kimi-k3 id", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "us.moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("D4b: completePrompt omits temperature for the prefixed us.moonshotai.kimi-k3 id (non-stream)", async () => {
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+			const handler = new AwsBedrockHandler({
+				apiModelId: "us.moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("D4: openai.gpt-oss-120b-1:0 is unaffected - temperature is still sent (unknown non-family ids keep their existing behaviour)", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "openai.gpt-oss-120b-1:0",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+		})
+
+		it("D6: createMessage sends K3's maxTokens capped at 128_000 (catalog default, no overrides)", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.maxTokens).toBeLessThanOrEqual(128_000)
+			expect(commandArg.inferenceConfig?.maxTokens).toBe(128_000)
+		})
+
+		it("D6: a modelMaxTokens override above K3's cap is clamped to 128_000 in the actual request", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				modelMaxTokens: 500_000,
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.maxTokens).toBe(128_000)
+		})
+
+		it("D6: a modelMaxTokens override below K3's cap is honoured verbatim in the actual request", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				modelMaxTokens: 50_000,
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.maxTokens).toBe(50_000)
+		})
+
+		it("D6: a probe-sourced awsModelMaxOutputTokens above K3's static catalog cap is honoured verbatim in the actual request", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "moonshotai.kimi-k3",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				awsModelMaxOutputTokens: 160_000,
+			})
+
+			const generator = handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as MinimalCommandArg
+			expect(commandArg.inferenceConfig?.maxTokens).toBe(160_000)
+		})
+	})
 })
