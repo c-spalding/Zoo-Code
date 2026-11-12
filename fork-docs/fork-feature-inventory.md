@@ -46,6 +46,7 @@ requires before merging the tranche (see section per tranche for the advisory li
 | 10    | `fork/01-small-fixes`          | T1 -- Small bug fixes                                   | **MERGED** -- 3 of 4 already SUPERSEDED upstream; only `da257010e` re-applied, see discrepancy note                                               | none mandatory                        |
 | 11    | `fork/11-new-bedrock-models`   | T11 -- New Bedrock models (GPT-5.6/6, Kimi K3), phase A | N/A -- new fork feature, not part of the original 10-tranche recon (added post v3.82.2 resync)                                                    | none mandatory                        |
 | 12    | `fork/14-payload-fixes`        | Smoke-test fixes, Tranche A (D4, D5, D6, D8)            | N/A -- fork-only defect fixes found during Stage 1 smoke-testing, see `plans/smoke-test-triage.md`                                                | none mandatory                        |
+| 13    | `fork/14-ui-parity`            | Smoke-test fixes, Tranche B (D1, D2, D3, D6-UI, B5)     | N/A -- fork-only webview-ui settings parity fixes found during Stage 1 smoke-testing, see `plans/smoke-test-triage.md`                            | none mandatory                        |
 
 `fork/00-docs` (this branch) precedes all of the above and carries no code.
 
@@ -1963,10 +1964,11 @@ unmodified upstream marketplace build. Per-extension pinning is preferred becaus
 Root-cause analysis for the Stage 1 smoke-test defects (D1-D8) lives in
 `plans/smoke-test-triage.md` (ground truth: `archive/zoo-base-3.56` read via `git show`;
 line numbers verified against `feature/zoo-base` HEAD at triage time). That document's
-fix specification was split into three tranches by risk/blast-radius; this section
-tracks tranche A, which is backend/catalog-only and fully unit-testable. Tranches B
-(webview-ui parity: D1, D2, D3, D6-UI) and C (profile-clone semantics: D7) are explicitly
-out of scope for this section and have NOT been implemented.
+fix specification was split into three tranches by risk/blast-radius. Tranche A
+(backend/catalog payload fixes) and Tranche B (webview-ui settings parity) are both
+MERGED, documented below. Tranche C (profile-clone semantics, D7) is
+verification-only -- see its subsection -- no code change was made or is currently
+recommended.
 
 ### Tranche A -- payload fixes (D4, D5, D6, D8)
 
@@ -2090,6 +2092,177 @@ src/api/providers/bedrock.ts):**
 `packages/types` and `src` pass; `eslint` clean on every touched file with no
 suppression-count increase (`src/eslint-suppressions.json` `api/providers/bedrock.ts`
 entry unchanged at 34). `webview-ui` was not touched (tranche B scope).
+
+### Tranche B -- webview-ui settings parity (D1, D2, D3, D6-UI, B5)
+
+**Status: MERGED** into `feature/zoo-base`. Branch: `fork/14-ui-parity`, tip commit
+`b5e2c16cd`.
+
+**D1 -- missing context-window override control
+(webview-ui/src/components/settings/ApiOptions.tsx):**
+
+- Root cause: the archive (commit `5ddb71b58`) added a Bedrock-only numeric input under
+  Advanced Settings that writes `awsModelContextWindow`; HEAD had the schema field and
+  both runtime/webview consumers, but the UI producer was never ported.
+- Fix: re-applied the archive's control verbatim (same placement, same gate
+  `selectedProvider === providerIdentifiers.bedrock`), adapted to HEAD's
+  `setApiConfigurationField` signature. Empty/non-numeric input clears the override
+  (`undefined`, falling back to the catalog value); a positive integer persists.
+  `data-testid="bedrock-context-window-override"` added per the triage's spec.
+- i18n: three new English-only keys
+  (`settings:providers.bedrock.contextWindowOverride{Label,Description,Placeholder}`),
+  matching the established precedent for this file's other Bedrock-only strings
+  (`detectMaxTokens*`, `structuredOutput*`) which are also English-only pending a
+  dedicated i18n pass -- confirmed via `scripts/find-missing-translations.js`, which
+  reports the same "missing in all 17 non-English locales" status for every existing
+  Bedrock-only key in this file, not just the three new ones.
+
+**D3 -- adaptive-effort models show a bare checkbox instead of the effort dropdown
+(webview-ui/src/components/settings/ThinkingBudget.tsx):**
+
+- Root cause (double gate): (1) the binary (`supportsReasoningBinary`) early-return at
+  the top of the component short-circuited BEFORE the budget branch could run, hiding
+  everything for Sonnet 5/Opus 5/Fable 5(.1)/Mythos 5; (2) even for models that reached
+  the budget branch (Opus 4.7/4.8, which lack the binary flag), that branch had no
+  sub-branch consulting the effort array, so it always rendered the thinking-tokens
+  slider. The archive's `useAdaptiveEffortInsteadOfBudget` predicate (commit
+  `06996004a`) implementing fix (2) was never ported when T3 added the effort arrays to
+  the HEAD catalog.
+- Fix: added `isAdaptiveEffortModel = isReasoningBudgetSupported &&
+Array.isArray(supportsReasoningEffort) && supportsReasoningEffort.length > 0`. The
+  binary early-return now reads `if (isReasoningSupported && !isAdaptiveEffortModel)`,
+  so adaptive models fall through to the budget branch; inside that branch, the
+  thinking-tokens slider is replaced with the effort `Select` (full array, including
+  `xhigh`/`max`) whenever `isAdaptiveEffortModel` is true. The auto-enable effect that
+  previously forced `enableReasoningEffort` back to `true` on every render is now scoped
+  to `isEffortOnlyPath = isReasoningEffortSupported && !isReasoningBudgetSupported`
+  (archive precedent), so unticking "Use reasoning" on an adaptive model sticks.
+- **Cross-provider blast-radius decision (per this tranche's explicit instructions):**
+  the relaxation is gated on `Array.isArray(supportsReasoningEffort)`, NOT on
+  `!isReasoningBudgetSupported` alone. OpenRouter's and Requesty's dynamic fetchers
+  (`src/api/providers/fetchers/openrouter.ts`, `requesty.ts`) set both
+  `supportsReasoningBinary` and `supportsReasoningBudget` for their Anthropic 5.x
+  entries but never set an explicit effort array, so `isAdaptiveEffortModel` is `false`
+  for them and they keep the exact pre-tranche bare-checkbox UI. Only the fork's
+  Bedrock catalog (array-metadata models) gets the new behaviour.
+
+**D2 -- max-output-tokens control hidden until reasoning is enabled
+(same file):**
+
+- Root cause: HEAD wrapped the thinking-tokens-slider-and-max-output-control pairing in
+  `(isReasoningBudgetRequired || enableReasoningEffort) &&`, so for a hybrid model with
+  reasoning OFF, the user had no way to adjust the max-output cap -- the archive (same
+  `06996004a` commit) rendered this control unconditionally because the cap is the
+  response-length envelope and is independent of whether the model is currently
+  thinking.
+- Fix: hoisted the max-output-tokens slider out of that conditional so it always renders
+  for every budget model (archive parity); only the thinking-tokens-slider-or-effort-dropdown
+  pairing remains gated on reasoning being enabled/required.
+
+**D6-UI -- flagless models (Kimi K3 and the newer GPT-5.6/6 family) show no max-output
+control and the "Detect max output tokens" probe is unreachable
+(packages/types/src/providers/bedrock.ts):**
+
+- Root cause: `ThinkingBudget`'s standalone max-output slider only renders when
+  `modelInfo.supportsMaxTokens` is set; K3 and most of the GPT-5.6/6 family have zero
+  reasoning flags at all, so the component rendered nothing and the probe button (nested
+  inside that control via `BedrockThinkingBudget`'s extra-slot) was unreachable even
+  though the probe plumbing itself works correctly end-to-end.
+- Fix: added `supportsMaxTokens: true` to `moonshotai.kimi-k3`,
+  `openai.gpt-5.6-{sol,terra,luna}`, `openai.gpt-6-astra` (previously zero reasoning
+  flags), and to `openai.gpt-6-{sol,luna}` (which already render the effort dropdown via
+  the effort-only path but still lacked the max-output control) and
+  `openai.gpt-6.1-sol`. Also forced `supportsMaxTokens: true` on
+  `resolveBedrockModelInfo`'s guess-path branch (any id not yet in the static catalog),
+  so a brand-new AWS-discovered model gets the control -- and therefore the probe --
+  immediately, without waiting on a catalog update. A known catalog hit is never
+  affected by this guess-path default (verified by a dedicated test).
+
+**B5 -- target-change hygiene (webview-ui/src/components/settings/providers/Bedrock.tsx):**
+
+- Root cause: `handleTargetChange` set the new target's `awsCustomArn` /
+  `awsBedrockInvokeTarget` / `awsBedrockTargetKind` / `apiModelId` fields but cleared
+  nothing else, unlike every `ModelPicker`-based provider (which runs
+  `handleModelChangeSideEffects` on model change). `awsModelMaxOutputTokens` and
+  `awsModelContextWindow` -- both per-model empirical/manual facts -- silently carried
+  over to the newly-selected model.
+- Fix: `handleTargetChange` now calls `handleModelChangeSideEffects` (clearing
+  `reasoningEffort`/`modelMaxTokens`/`modelMaxThinkingTokens`, matching every other
+  provider) and additionally clears `awsModelMaxOutputTokens` and
+  `awsModelContextWindow`. Applied on both the normal-target and manual-ARN-target
+  branches. Deliberately kept OUT of the `useEffect` profile-load normaliser so loading
+  an existing saved profile never wipes an intentionally-set value -- verified by a
+  dedicated "does NOT reset on initial profile load" test.
+- This closes the dangerous half of D7's symptom (an invisible stale override silently
+  applied to a new model): D1/D2/D3/D6-UI make the per-model values visible, and B5
+  resets them on model change, so nothing model-scoped can be carried over without
+  either being visible in the UI or being cleared.
+
+**Sweep extras (B4, cosmetic):** restored `MaxOutputTokensControl`'s `defaultValue` /
+`inputAriaLabel` props (present in the archive, dropped from HEAD -- `defaultValue` only
+matters when the stored value is falsy, `inputAriaLabel` only affects the numeric
+input's accessible name) and the structured-output checkbox's info-icon tooltip
+(archive had an icon + tooltip; HEAD had only the plain description paragraph below the
+checkbox). The tooltip reuses the existing `structuredOutputDescription` string rather
+than introducing a new i18n key for duplicate text.
+
+**Tests added (all passing):**
+
+- `webview-ui/src/components/settings/__tests__/ThinkingBudget.spec.tsx`: 13 new cases
+  covering every row of the triage's behavioural-contract table -- Sonnet 5
+  (binary+budget+array) renders the effort dropdown including `xhigh`/`max` and NOT the
+  thinking-tokens slider; Opus 4.7 (budget+array, no binary) likewise; GPT-6 Sol
+  (effort-only) unchanged; a budget-only Anthropic model (no binary, no array) unchanged
+  AND now shows the max-output control even with reasoning off (D2); a cross-provider
+  guard case mirroring OpenRouter's/Requesty's binary+budget-without-array shape keeps
+  the bare checkbox; unticking "Use reasoning" on an adaptive model does not get
+  auto-reverted.
+- `webview-ui/src/components/settings/__tests__/ApiOptions.spec.tsx`: 7 new cases --
+  renders only for Bedrock, renders exactly once, shows the current value, shows empty
+  when unset, parses and persists a positive integer, clears on empty input, clears on
+  non-numeric/non-positive input.
+- `webview-ui/src/components/settings/providers/__tests__/Bedrock.spec.tsx`: 4 new B5
+  cases -- clears both per-model override fields on target change, also clears the
+  generic reasoning fields via `handleModelChangeSideEffects`, resets on the manual-ARN
+  target too, and does NOT reset on initial profile load (no user interaction).
+- `webview-ui/src/components/settings/providers/__tests__/BedrockThinkingBudget.d6ui.spec.tsx`
+  (new file): unlike the existing `BedrockThinkingBudget.spec.tsx` (which mocks
+  `ThinkingBudget`), this file renders the real, unmocked component tree so the
+  "Detect max output tokens" probe button's actual DOM reachability for a flagless
+  model (K3) can be asserted directly, plus a negative case proving the pre-fix catalog
+  shape (no `supportsMaxTokens`) renders neither the control nor the probe.
+- `packages/types/src/providers/__tests__/bedrock-catalog.spec.ts` /
+  `packages/types/src/__tests__/bedrock-t11-models.test.ts`: new assertions that every
+  updated catalog entry declares `supportsMaxTokens: true`, and that the guess path
+  forces it on for an unknown id while leaving a real catalog hit's (undefined)
+  `supportsMaxTokens` untouched.
+
+**Validation:** `pnpm check-types` clean across all 11 workspace packages; `webview-ui`
+settings directory 658/658 tests pass; `packages/types` 493/493 pass; `src`
+bedrock/bedrock-reasoning/bedrock-discovery 158/158 pass unchanged (confirms the backend
+was not behaviourally touched by this tranche); `eslint` clean on every touched file;
+`src/eslint-suppressions.json` untouched (no `src/` production files were modified this
+tranche -- it is webview-ui + packages/types only).
+
+### Tranche C -- profile-clone semantics (D7): verification-only, no code change
+
+Per the triage's own finding (section 2, D7) and its "things that change the plan"
+section 5 item 4: D7 (new Bedrock profiles silently inheriting model-scoped values via
+`upsertApiConfiguration`'s full-clone semantics) is **archive parity**, not a
+regression -- the archive's `onUpsertConfig` is byte-identical. The triage explicitly
+recommends against changing upsert/clone semantics (C1: "Do NOT change upsert
+semantics") and treats the real complaint as "model-scoped values persist invisibly",
+which Tranche B's D1/D2/D3/D6-UI (visibility) and B5 (reset-on-model-change) fully
+address without touching profile-creation code at all (C2: "nothing model-scoped can be
+applied without a visible control showing it").
+
+**No change made.** This entry exists to record that D7 was explicitly re-evaluated
+after Tranche B landed and confirmed closed by visibility + reset, consistent with the
+triage's own disposition. The triage's optional C3 (a `createProfile` message variant
+that clones only provider-identity + credentials, dropping all model-scoped keys) was
+NOT implemented -- it is explicitly gated on Chris wanting it, and the triage lists no
+existing precedent for that whitelist-copy pattern anywhere else in the codebase. If
+desired, C3 remains a discrete, separately-scoped follow-up.
 
 **Rollback:** open the Extensions panel, search "Zoo Code", click **"Uninstall"** on the
 fork build, then click **"Install"** on the marketplace listing (or simply click
