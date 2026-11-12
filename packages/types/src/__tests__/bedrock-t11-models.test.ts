@@ -205,6 +205,28 @@ describe("T11 Bedrock catalog entries", () => {
 			expect(bedrockModels).toHaveProperty("moonshotai.kimi-k3")
 			expect(bedrockModels).toHaveProperty("moonshot.kimi-k2-thinking")
 		})
+
+		// D6-UI (smoke-test-triage.md tranche B, B3): K3 has no reasoning flags at all,
+		// so without supportsMaxTokens the ThinkingBudget max-output control (and its
+		// nested "Detect max output tokens" probe slot) never renders - this is the
+		// catalog-level fix that makes the UI bug visible to a regression test.
+		it("declares supportsMaxTokens so the max-output control and probe slot render (D6-UI)", () => {
+			const info = bedrockModels["moonshotai.kimi-k3"]
+			expect((info as ModelInfo).supportsMaxTokens).toBe(true)
+		})
+	})
+
+	// D6-UI (smoke-test-triage.md tranche B, B3): every GPT-5.6/6 entry gets
+	// supportsMaxTokens so the max-output slider + probe render for this family too
+	// (GPT-5.6 Sol/Terra/Luna and GPT-6 Astra have NO reasoning flags at all and
+	// previously rendered nothing, same bug class as K3).
+	describe("D6-UI: supportsMaxTokens on the GPT-5.6/6 family", () => {
+		it("every T11 GPT model id declares supportsMaxTokens: true", () => {
+			for (const id of T11_GPT_MODEL_IDS) {
+				const info = bedrockModels[id as keyof typeof bedrockModels] as ModelInfo
+				expect(info.supportsMaxTokens).toBe(true)
+			}
+		})
 	})
 
 	describe("BEDROCK_MANDATORY_INFERENCE_PROFILE_MODEL_IDS", () => {

@@ -10,10 +10,19 @@ import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
 // Mock VSCode components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({ children, value, onBlur }: any) => (
+	VSCodeTextField: ({ children, value, onBlur, onInput, placeholder, "data-testid": dataTestId }: any) => (
 		<div>
 			{children}
-			<input type="text" value={value} onChange={onBlur} />
+			<input
+				type="text"
+				value={value}
+				placeholder={placeholder}
+				data-testid={dataTestId}
+				onChange={(e) => {
+					onBlur?.(e)
+					onInput?.(e)
+				}}
+			/>
 		</div>
 	),
 	VSCodeTextArea: ({ value, onInput, ...props }: any) => (
@@ -782,6 +791,81 @@ describe("ApiOptions", () => {
 			fireEvent.change(textarea, { target: { value: "" } })
 
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("profileCustomInstructions", undefined)
+		})
+	})
+
+	describe("bedrock context window override (D1)", () => {
+		// Regression guard mirroring F-DC-2: this control must render exactly once,
+		// only for the Bedrock provider, and must not duplicate across re-renders.
+		it("renders the override input only when selectedProvider is bedrock", () => {
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+			})
+
+			expect(screen.queryByTestId("bedrock-context-window-override")).not.toBeInTheDocument()
+		})
+
+		it("renders exactly one override input for the bedrock provider", () => {
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock },
+			})
+
+			expect(screen.getAllByTestId("bedrock-context-window-override")).toHaveLength(1)
+		})
+
+		it("shows the current awsModelContextWindow value", () => {
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock, awsModelContextWindow: 262144 },
+			})
+
+			expect(screen.getByTestId("bedrock-context-window-override")).toHaveValue("262144")
+		})
+
+		it("shows an empty input when awsModelContextWindow is unset", () => {
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock },
+			})
+
+			expect(screen.getByTestId("bedrock-context-window-override")).toHaveValue("")
+		})
+
+		it("parses and persists a positive integer input", () => {
+			const mockSetApiConfigurationField = vi.fn()
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock },
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const input = screen.getByTestId("bedrock-context-window-override")
+			fireEvent.change(input, { target: { value: "131072" } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", 131072)
+		})
+
+		it("clears the override when the input is emptied", () => {
+			const mockSetApiConfigurationField = vi.fn()
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock, awsModelContextWindow: 200000 },
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const input = screen.getByTestId("bedrock-context-window-override")
+			fireEvent.change(input, { target: { value: "" } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
+		})
+
+		it("clears the override when the input is non-numeric or non-positive", () => {
+			const mockSetApiConfigurationField = vi.fn()
+			renderApiOptions({
+				apiConfiguration: { apiProvider: providerIdentifiers.bedrock, awsModelContextWindow: 200000 },
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const input = screen.getByTestId("bedrock-context-window-override")
+			fireEvent.change(input, { target: { value: "abc" } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
 		})
 	})
 })

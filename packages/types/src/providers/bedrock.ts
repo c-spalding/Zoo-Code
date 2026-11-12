@@ -515,6 +515,15 @@ export const bedrockModels = {
 	// Sol/Luna specifically - the only two entries with an AWS-documented effort
 	// allow-list. GPT-5.6 Sol/Terra/Luna and GPT-6 Astra still have no documented
 	// effort contract (doc gap, see research Q2) and remain catalog-only.
+	// D6-UI (smoke-test-triage.md tranche B, B3): every entry in this GPT family sets
+	// supportsMaxTokens: true so ThinkingBudget's standalone max-output control (and the
+	// "Detect max output tokens" probe slot nested inside it, see BedrockThinkingBudget)
+	// renders for these models. Before this, GPT-5.6 Sol/Terra/Luna and GPT-6 Astra (which
+	// have NO reasoning flags at all) rendered nothing whatsoever - the exact same
+	// "flagless model, no control, no probe" bug as Kimi K3 below. GPT-6 Sol/Luna DO render
+	// the effort dropdown already, but still lacked the max-output slider/probe - their
+	// maxTokens values are explicitly marked "unverified" above, making the probe
+	// particularly valuable for them.
 	"openai.gpt-5.6-sol": {
 		// maxTokens unverified - borrowed from upstream non-Bedrock openai.ts
 		// gpt-5.6-sol entry; the AWS model card is silent on max output tokens.
@@ -523,6 +532,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		inputPrice: 4.0, // Global CRIS; in-Region/Geo CRIS is ~10% higher (not modelled)
 		outputPrice: 20.0,
 		longContextPricing: {
@@ -543,6 +553,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		inputPrice: 2.0, // Global CRIS
 		outputPrice: 12.0,
 		longContextPricing: {
@@ -561,6 +572,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		inputPrice: 0.2, // Global CRIS
 		outputPrice: 1.2,
 		longContextPricing: {
@@ -577,6 +589,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		inputPrice: 10.0, // Global CRIS
 		outputPrice: 50.0,
 		longContextPricing: {
@@ -597,6 +610,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		// AWS-documented directly on this model's card: "Set reasoning effort to
 		// none, low, medium, high, xhigh, or max. The default is medium." Phase B
 		// (src/api/providers/bedrock.ts) sends this as the confirmed nested
@@ -622,6 +636,7 @@ export const bedrockModels = {
 		supportsImages: true,
 		supportsPromptCache: false,
 		supportsTemperature: false,
+		supportsMaxTokens: true,
 		// AWS-documented directly on this model's card, identical wording to GPT-6 Sol.
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
@@ -667,6 +682,11 @@ export const bedrockModels = {
 		// future unknown GPT id, but set explicitly here so this entry is
 		// self-describing.
 		supportsTemperature: false,
+		// D6-UI (smoke-test-triage.md tranche B, B3): surfaces the max-output slider +
+		// "Detect max output tokens" probe (the maxTokens value above is marked
+		// VERIFIED but AWS could still raise/lower it later - the probe lets a user
+		// confirm the live cap without waiting on a catalog update).
+		supportsMaxTokens: true,
 		// Reasoning effort: VERIFIED the nested additionalModelRequestFields -
 		// { reasoning: { effort } } shape is accepted (same shape as GPT-6 Sol/Luna,
 		// NOT the flat `reasoning_effort` field, which 400s with
@@ -871,6 +891,13 @@ export const bedrockModels = {
 		// code paths that look the entry up directly without going through
 		// resolveBedrockModelInfo's family-predicate fallback.
 		supportsTemperature: false,
+		// D6-UI (smoke-test-triage.md tranche B, B3): K3 has NO reasoning flags at all
+		// (no binary/budget/effort), so without this flag ThinkingBudget's
+		// maxOutputTokensControl is null and the "Detect max output tokens" probe slot
+		// nested inside it is unreachable - the exact bug the triage's D6-UI item
+		// describes. Tranche A already fixed the payload cap (128_000 above); this flag
+		// is what makes the control (and the probe) visible in the Settings UI.
+		supportsMaxTokens: true,
 		inputPrice: 3.0, // Global CRIS
 		outputPrice: 15.0,
 		cacheWritesPrice: 3.75, // 30-min explicit-caching write rate (Responses/Chat Completions only; unused on Converse)
@@ -1548,13 +1575,20 @@ export const resolveBedrockModelInfo = ({
 }): { baseModelId: string; info: ModelInfo; uses1MContext: boolean; contextSource: BedrockContextSource } => {
 	const resolvedBaseModelId = parseBedrockBaseModelId(baseModelId || targetId || bedrockDefaultModelId)
 
-	const baseInfo =
-		resolvedBaseModelId in bedrockModels
-			? cloneModelInfo(bedrockModels[resolvedBaseModelId as keyof typeof bedrockModels])
-			: {
-					...cloneModelInfo(bedrockModels[bedrockDefaultModelId]),
-					...guessBedrockModelInfoFromId(resolvedBaseModelId),
-				}
+	const isGuessedModel = !(resolvedBaseModelId in bedrockModels)
+	const baseInfo = isGuessedModel
+		? {
+				...cloneModelInfo(bedrockModels[bedrockDefaultModelId]),
+				...guessBedrockModelInfoFromId(resolvedBaseModelId),
+				// D6-UI (smoke-test-triage.md tranche B, B3): any id AWS discovery surfaces
+				// that isn't in the static catalog yet has an unverified maxTokens guess
+				// (BEDROCK_MAX_TOKENS or a pattern-matched default) - exactly the situation
+				// the "Detect max output tokens" probe exists to resolve empirically. Force
+				// supportsMaxTokens:true here so the control (and its nested probe slot)
+				// render for every unknown id, not just the catalog entries updated above.
+				supportsMaxTokens: true,
+			}
+		: cloneModelInfo(bedrockModels[resolvedBaseModelId as keyof typeof bedrockModels])
 
 	// D4a/D4b (smoke-test-triage.md): the guess path (and the sonnet-4-5 default entry it
 	// spreads over for unknown ids) has no way to know a brand-new OpenAI or Moonshot id
