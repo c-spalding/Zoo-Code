@@ -1846,6 +1846,30 @@ for exact commands. This section is the handoff for the two remaining human step
 smoke-testing in the Extension Development Host (Stage 1), then installing the VSIX
 over the marketplace build (Stage 2). **Do not skip to Stage 2 before Stage 1 passes.**
 
+**2026-11-12 update -- retarget Stage 1 retest to fork.2:** Smoke-test fixes Tranche A
+(payload, `fork/14-payload-fixes`) and Tranche B (UI parity, `fork/14-ui-parity`) have
+since merged into `feature/zoo-base` (see section 20). Point the Stage 1 retest at
+commit `103bcc9af` (`feature/zoo-base` tip) and either the rebuilt
+`bin/zoo-code-3.82.2-fork.2.vsix` (35,053,028 bytes / 33.43 MB) or the equivalent
+Extension Development Host (F5) build at the same commit -- both run identical
+`src/dist` + `webview-ui` output. `pnpm bundle`, the `vsce package --pre-release
+--no-dependencies` build, an archive-listing sanity check (`extension/dist/extension.js`
+and the `extension/webview-ui/` payload both present), and `cd src && npx vitest run
+__tests__/dist_assets.spec.ts` (40/40 passed) were all re-confirmed green for this build.
+Retest against the `-fork.2` build, not the superseded `-fork.1` one referenced
+elsewhere in this section.
+
+**fork.2 retest focus (re-run the Stage 1 checklist below against this build, with
+particular attention to the following, since these are what Tranches A/B targeted):**
+
+- Context-window override control visible in Bedrock advanced settings.
+- Reasoning-effort dropdown appears for Sonnet 5 / Opus 4.8 (and still for GPT-6 Sol).
+- Max-output-tokens control + probe visible for Kimi K3 before/without reasoning.
+- Kimi K3 and GPT-6.1 Sol requests succeed (no temperature/max-tokens 400s).
+- Truncation marker appears if output hits the token limit.
+- Switching Bedrock target clears stale per-model overrides.
+- New-profile behaviour sanity (D7).
+
 ### STAGE 1 -- Developer mode (do this first)
 
 **How to launch:** open this repo in VS Code, then press **F5** (or **Run and Debug**
@@ -1928,11 +1952,11 @@ profile):**
 ### STAGE 2 -- VSIX install (only after Stage 1 passes)
 
 **Install command + UI route:** either run
-`code --install-extension "bin\zoo-code-3.82.2-fork.1.vsix"` from a terminal (adjust the
+`code --install-extension "bin\zoo-code-3.82.2-fork.2.vsix"` from a terminal (adjust the
 path/version to the actual built artifact), or in VS Code's normal window open the
 Extensions panel (`Ctrl+Shift+X`) > "..." menu (top-right) > **"Install from VSIX..."**
 
-> browse to `bin\zoo-code-3.82.2-fork.1.vsix`. Either route **replaces** the installed
+> browse to `bin\zoo-code-3.82.2-fork.2.vsix`. Either route **replaces** the installed
 > marketplace build in place because both share extension id
 > `zoocodeorganization.zoo-code` -- this is the point of no return the task description
 > warns about; do this only after Stage 1 smoke-testing has passed.
