@@ -667,7 +667,10 @@
 			"detectMaxTokensError": "Detection failed: {{error}}",
 			"detectMaxTokensReset": "Reset to default",
 			"structuredOutputLabel": "Use strict structured output for tool calls",
-			"structuredOutputDescription": "Validates tool call arguments against a strict JSON schema for more reliable parsing. Automatically falls back to standard mode for 30 days if a model rejects it."
+			"structuredOutputDescription": "Validates tool call arguments against a strict JSON schema for more reliable parsing. Automatically falls back to standard mode for 30 days if a model rejects it.",
+			"contextWindowOverrideLabel": "Override context window (tokens)",
+			"contextWindowOverrideDescription": "AWS Bedrock does not publish per-model context window sizes through any control-plane API, so Zoo Code falls back to a static table for unknown models (default {{default}}). If the actual context window of the model you're using differs, enter the correct value here. Leave blank to use the model's catalog value.",
+			"contextWindowOverridePlaceholder": "e.g. 262144"
 		},
 		"awsBedrockVpc": {
 			"useCustomVpcEndpoint": "Use custom VPC endpoint",

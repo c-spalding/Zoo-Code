@@ -103,6 +103,23 @@ export const ThinkingBudget = ({
 	// full option set as ReasoningEffortExtended | "disable" from the start to avoid casts.
 	type ReasoningEffortOption = ReasoningEffortExtended | "disable"
 	const supports = modelInfo?.supportsReasoningEffort
+
+	// D3 (smoke-test-triage.md): models that advertise BOTH a reasoning budget AND an
+	// explicit effort array are using Anthropic's "adaptive thinking" shape (Bedrock
+	// Sonnet 5 / Opus 5 / Opus 4.7 / Opus 4.8 / Fable 5(.1) / Mythos 5). The API ignores
+	// any token-budget input for these models - the model decides how long to think
+	// based on the effort bucket - so the per-thinking-tokens slider is meaningless and
+	// the effort dropdown must be shown instead.
+	//
+	// Deliberately gated on Array.isArray(supports) rather than on
+	// `isReasoningBudgetSupported && isReasoningEffortSupported` alone: OpenRouter's and
+	// Requesty's dynamic fetchers set BOTH supportsReasoningBinary AND
+	// supportsReasoningBudget true for their Anthropic 5.x entries but never set an
+	// explicit supportsReasoningEffort array, so they must keep today's bare-checkbox
+	// UI. Only the fork's Bedrock catalog (and any future provider that advertises a
+	// real effort array alongside a budget flag) should move to the adaptive branch.
+	const isAdaptiveEffortModel = isReasoningBudgetSupported && Array.isArray(supports) && supports.length > 0
+
 	const baseAvailableOptions: ReadonlyArray<ReasoningEffortOption> =
 		supports === true
 			? (reasoningEfforts as readonly ReasoningEffortOption[])
@@ -146,16 +163,25 @@ export const ThinkingBudget = ({
 		}
 	}, [isReasoningEffortSupported, storedReasoningEffort, currentReasoningEffort, setApiConfigurationField])
 
-	// Sync enableReasoningEffort based on selection
-	// "disable" turns off reasoning; "none" is a valid level (reasoning enabled)
+	// Sync enableReasoningEffort based on the dropdown selection.
+	//
+	// This effect is only meaningful for the EFFORT-ONLY path, where the dropdown is the
+	// user's single source of truth for whether reasoning is on. In the adaptive-thinking
+	// path (budget + effort array, e.g. Bedrock Sonnet 5 / Opus 4.7) the dedicated "Use
+	// reasoning" checkbox is the source of truth, and forcibly re-enabling reasoning here
+	// would prevent the user from ever switching it off (ticking the checkbox off would be
+	// immediately reverted because the dropdown still shows a non-"disable" value). Archive
+	// precedent: 06996004a scoped this exact effect to the effort-only path for the same
+	// reason.
+	const isEffortOnlyPath = isReasoningEffortSupported && !isReasoningBudgetSupported
 	useEffect(() => {
-		if (!isReasoningEffortSupported) return
+		if (!isEffortOnlyPath) return
 		const shouldEnable = modelInfo?.requiredReasoningEffort || currentReasoningEffort !== "disable"
 		if (shouldEnable && apiConfiguration.enableReasoningEffort !== true) {
 			setApiConfigurationField("enableReasoningEffort", true, false)
 		}
 	}, [
-		isReasoningEffortSupported,
+		isEffortOnlyPath,
 		modelInfo?.requiredReasoningEffort,
 		currentReasoningEffort,
 		apiConfiguration.enableReasoningEffort,
@@ -210,6 +236,12 @@ export const ThinkingBudget = ({
 					value={value}
 					min={min}
 					max={max}
+					// B4 sweep extra (smoke-test-triage.md tranche B): archive passed both
+					// of these into MaxOutputTokensControl; HEAD had dropped them (cosmetic
+					// gap - defaultValue only matters when value is falsy, and
+					// inputAriaLabel only affects the numeric input's accessible name).
+					defaultValue={DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS}
+					inputAriaLabel={t("settings:thinkingBudget.maxTokens")}
 					onChange={(newValue) => setApiConfigurationField("modelMaxTokens", newValue)}
 					extraSlot={maxOutputTokensExtraSlot}
 					helperText={maxOutputTokensHelperText}
@@ -238,10 +270,24 @@ export const ThinkingBudget = ({
 			? renderMaxTokensSlider(1024, modelInfo.maxTokens, standaloneMaxOutputTokens, "max-output-tokens")
 			: null
 
-	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle.
-	// A binary-reasoning model can still advertise `supportsMaxTokens`, so surface the
+	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle -
+	// UNLESS the model is also an adaptive-effort model (D3: budget + explicit effort array,
+	// e.g. Bedrock Sonnet 5 / Opus 5 / Fable 5(.1) / Mythos 5 set supportsReasoningBinary AND
+	// supportsReasoningBudget AND an effort array). Those models must fall through to the
+	// budget branch below so the max-output control (D2) and the effort dropdown (D3) are
+	// reachable.
+	//
+	// CROSS-PROVIDER GUARD: this relaxation is deliberately scoped to
+	// `isAdaptiveEffortModel` (which requires Array.isArray(supportsReasoningEffort)), NOT to
+	// `!isReasoningBudgetSupported`. OpenRouter's and Requesty's dynamic fetchers also set
+	// both supportsReasoningBinary AND supportsReasoningBudget true for their Anthropic 5.x
+	// entries (openrouter.ts, requesty.ts) but never set an explicit effort array, so
+	// `isAdaptiveEffortModel` is false for them and they keep today's bare-checkbox UI
+	// unchanged - only the fork's Bedrock catalog (array-metadata models) gets the new
+	// behaviour.
+	// A binary-only-reasoning model can still advertise `supportsMaxTokens`, so surface the
 	// standalone max-output slider alongside the toggle when it applies.
-	if (isReasoningSupported) {
+	if (isReasoningSupported && !isAdaptiveEffortModel) {
 		return (
 			<>
 				{maxOutputTokensControl}
@@ -271,17 +317,62 @@ export const ThinkingBudget = ({
 					</Checkbox>
 				</div>
 			)}
-			{(isReasoningBudgetRequired || enableReasoningEffort) && (
-				<>
-					{renderMaxTokensSlider(
-						8192,
-						Math.max(
-							modelInfo.maxTokens || 8192,
-							customMaxOutputTokens,
-							DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
-						),
-						customMaxOutputTokens,
-					)}
+			{/*
+			 * D2 (smoke-test-triage.md): the max-output-tokens control is rendered for ALL
+			 * hybrid-reasoning models regardless of whether reasoning is currently enabled -
+			 * archive parity (06996004a). The cap is the response-length envelope and is
+			 * independent of whether the model is thinking; hiding it behind the "Use
+			 * reasoning" checkbox made it impossible to lower the output cap without first
+			 * enabling reasoning.
+			 */}
+			{renderMaxTokensSlider(
+				8192,
+				Math.max(modelInfo.maxTokens || 8192, customMaxOutputTokens, DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS),
+				customMaxOutputTokens,
+			)}
+			{(isReasoningBudgetRequired || enableReasoningEffort) &&
+				(isAdaptiveEffortModel ? (
+					// D3: adaptive-thinking models (budget + effort array) ignore the token
+					// budget entirely - the effort dropdown is the only configurable knob.
+					<div className="flex flex-col gap-1" data-testid="reasoning-effort">
+						<label className="block font-medium mb-1">
+							{t("settings:providers.reasoningEffort.label")}
+						</label>
+						<Select
+							value={
+								currentReasoningEffort === "disable" || currentReasoningEffort === "none"
+									? (modelDefaultReasoningEffort ?? "medium")
+									: currentReasoningEffort
+							}
+							onValueChange={(value: ReasoningEffortOption) => {
+								// In adaptive mode "disable"/"none" can't be selected here because
+								// the parent checkbox above already gates whether reasoning is on.
+								// Persist the picked effort as-is.
+								setApiConfigurationField("reasoningEffort", value as ReasoningEffortExtended)
+							}}>
+							<SelectTrigger className="w-full">
+								<SelectValue
+									placeholder={t(
+										`settings:providers.reasoningEffort.${
+											currentReasoningEffort === "disable" || currentReasoningEffort === "none"
+												? (modelDefaultReasoningEffort ?? "medium")
+												: currentReasoningEffort
+										}`,
+									)}
+								/>
+							</SelectTrigger>
+							<SelectContent>
+								{baseAvailableOptions.map((value) => (
+									<SelectItem key={value} value={value}>
+										{value === "none"
+											? t("settings:providers.reasoningEffort.none")
+											: t(`settings:providers.reasoningEffort.${value}`)}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+				) : (
 					<div className="flex flex-col gap-1">
 						<div className="font-medium">{t("settings:thinkingBudget.maxThinkingTokens")}</div>
 						<div className="flex items-center gap-1" data-testid="reasoning-budget">
@@ -295,8 +386,7 @@ export const ThinkingBudget = ({
 							<div className="w-12 text-sm text-center">{customMaxThinkingTokens}</div>
 						</div>
 					</div>
-				</>
-			)}
+				))}
 		</>
 	) : isReasoningEffortSupported ? (
 		<>

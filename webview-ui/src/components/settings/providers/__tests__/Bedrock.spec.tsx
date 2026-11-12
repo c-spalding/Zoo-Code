@@ -5,19 +5,34 @@ import { ProviderSettings, type BedrockDiscoveredTarget } from "@roo-code/types"
 
 const useBedrockDiscoveryMock = vi.hoisted(() => vi.fn())
 
-// Mock the vscrui Checkbox component
+// Mock the vscrui Checkbox component.
+// `children` may be plain text (most checkboxes) or a JSX fragment wrapping a label +
+// tooltip icon (e.g. the structured-output checkbox, B4 sweep extra). Recursively extract
+// the text content so the derived data-testid stays stable regardless of which shape the
+// caller uses.
+const extractCheckboxLabelText = (node: any): string => {
+	if (node === null || node === undefined || typeof node === "boolean") return ""
+	if (typeof node === "string" || typeof node === "number") return String(node)
+	if (Array.isArray(node)) return node.map(extractCheckboxLabelText).join("")
+	if (typeof node === "object" && "props" in node) return extractCheckboxLabelText(node.props?.children)
+	return ""
+}
+
 vi.mock("vscrui", () => ({
-	Checkbox: ({ children, checked, onChange }: any) => (
-		<label data-testid={`checkbox-${children?.toString().replace(/\s+/g, "-").toLowerCase()}`}>
-			<input
-				type="checkbox"
-				checked={checked}
-				onChange={() => onChange(!checked)} // Toggle the checked state
-				data-testid={`checkbox-input-${children?.toString().replace(/\s+/g, "-").toLowerCase()}`}
-			/>
-			{children}
-		</label>
-	),
+	Checkbox: ({ children, checked, onChange }: any) => {
+		const labelText = extractCheckboxLabelText(children).replace(/\s+/g, "-").toLowerCase()
+		return (
+			<label data-testid={`checkbox-${labelText}`}>
+				<input
+					type="checkbox"
+					checked={checked}
+					onChange={() => onChange(!checked)} // Toggle the checked state
+					data-testid={`checkbox-input-${labelText}`}
+				/>
+				{children}
+			</label>
+		)
+	},
 }))
 
 // Mock the VSCodeTextField component
@@ -652,6 +667,134 @@ describe("Bedrock Component", () => {
 				"apiModelId",
 				"anthropic.claude-3-5-sonnet-20241022-v2:0",
 			)
+		})
+
+		// B5 (smoke-test-triage.md tranche B): awsModelMaxOutputTokens and
+		// awsModelContextWindow are per-model facts; changing the target/model must clear
+		// both so a stale probe/manual override from the previously-selected model is never
+		// silently applied to the newly-selected one.
+		describe("B5: handleTargetChange resets model-scoped overrides", () => {
+			it("clears awsModelMaxOutputTokens and awsModelContextWindow when the target changes", () => {
+				useBedrockDiscoveryMock.mockReturnValue({
+					...defaultDiscoveryResult,
+					data: targets,
+					refetch: vi.fn(),
+				})
+
+				const apiConfiguration: Partial<ProviderSettings> = {
+					awsUseProfile: true,
+					awsRegion: "us-east-1",
+					awsModelMaxOutputTokens: 16384,
+					awsModelContextWindow: 500_000,
+				}
+
+				render(
+					<Bedrock
+						apiConfiguration={apiConfiguration as ProviderSettings}
+						setApiConfigurationField={mockSetApiConfigurationField}
+					/>,
+				)
+
+				const targetSelect = screen.getByTestId("bedrock-target-select") as HTMLSelectElement
+				fireEvent.change(targetSelect, {
+					target: {
+						value: "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-app-profile",
+					},
+				})
+
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelMaxOutputTokens", undefined)
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
+			})
+
+			it("also clears the generic reasoning fields via handleModelChangeSideEffects", () => {
+				useBedrockDiscoveryMock.mockReturnValue({
+					...defaultDiscoveryResult,
+					data: targets,
+					refetch: vi.fn(),
+				})
+
+				const apiConfiguration: Partial<ProviderSettings> = {
+					awsUseProfile: true,
+					awsRegion: "us-east-1",
+					reasoningEffort: "high",
+					modelMaxTokens: 50_000,
+					modelMaxThinkingTokens: 10_000,
+				}
+
+				render(
+					<Bedrock
+						apiConfiguration={apiConfiguration as ProviderSettings}
+						setApiConfigurationField={mockSetApiConfigurationField}
+					/>,
+				)
+
+				const targetSelect = screen.getByTestId("bedrock-target-select") as HTMLSelectElement
+				fireEvent.change(targetSelect, {
+					target: { value: "anthropic.claude-3-5-sonnet-20241022-v2:0" },
+				})
+
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
+			})
+
+			it("resets model-scoped overrides when switching to the manual ARN target too", () => {
+				useBedrockDiscoveryMock.mockReturnValue({
+					...defaultDiscoveryResult,
+					data: targets,
+					refetch: vi.fn(),
+				})
+
+				const apiConfiguration: Partial<ProviderSettings> = {
+					awsUseProfile: true,
+					awsRegion: "us-east-1",
+					awsModelMaxOutputTokens: 16384,
+					awsModelContextWindow: 500_000,
+				}
+
+				render(
+					<Bedrock
+						apiConfiguration={apiConfiguration as ProviderSettings}
+						setApiConfigurationField={mockSetApiConfigurationField}
+					/>,
+				)
+
+				const targetSelect = screen.getByTestId("bedrock-target-select") as HTMLSelectElement
+				fireEvent.change(targetSelect, { target: { value: "__bedrock_manual_arn__" } })
+
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelMaxOutputTokens", undefined)
+				expect(mockSetApiConfigurationField).toHaveBeenCalledWith("awsModelContextWindow", undefined)
+			})
+
+			it("does NOT reset model-scoped overrides on initial profile load (no target change)", () => {
+				useBedrockDiscoveryMock.mockReturnValue({
+					...defaultDiscoveryResult,
+					data: targets,
+					refetch: vi.fn(),
+				})
+
+				const apiConfiguration: Partial<ProviderSettings> = {
+					awsUseProfile: true,
+					awsRegion: "us-east-1",
+					awsModelMaxOutputTokens: 16384,
+					awsModelContextWindow: 500_000,
+					awsBedrockInvokeTarget: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				}
+
+				render(
+					<Bedrock
+						apiConfiguration={apiConfiguration as ProviderSettings}
+						setApiConfigurationField={mockSetApiConfigurationField}
+					/>,
+				)
+
+				// Rendering alone (profile load, no user interaction with the target
+				// select) must never clear the saved overrides - only the handleTargetChange
+				// callback does, and only when the user actually picks a different target.
+				expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("awsModelMaxOutputTokens", undefined)
+				expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("awsModelContextWindow", undefined)
+			})
 		})
 
 		it("disables the refresh button when no region is configured", () => {

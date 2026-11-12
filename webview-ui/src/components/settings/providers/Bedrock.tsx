@@ -16,6 +16,7 @@ import {
 	expandBedrockTargetsWith1MVariants,
 	inferBedrockInvokeTargetKind,
 	parseBedrockBaseModelId,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useBedrockDiscovery } from "@src/components/ui/hooks/useBedrockDiscovery"
@@ -32,6 +33,7 @@ import {
 } from "@src/components/ui"
 
 import { inputEventTransform, noTransform } from "../transforms"
+import { handleModelChangeSideEffects } from "../utils/providerModelConfig"
 import { BedrockCustomArn } from "./BedrockCustomArn"
 
 type BedrockProps = {
@@ -241,11 +243,35 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 		[setApiConfigurationField],
 	)
 
+	// B5 (smoke-test-triage.md tranche B): awsModelMaxOutputTokens and awsModelContextWindow
+	// are per-model facts (an empirically-probed cap / a manually-entered context window for
+	// one specific model). Carrying them across a target/model change silently applies a
+	// stale override to the newly-selected model - this is D7's dangerous symptom (an
+	// invisible override being applied) made concrete for Bedrock specifically, since
+	// Bedrock.tsx never wired into the generic handleModelChangeSideEffects reset that
+	// ModelPicker-based providers get. Resetting here (a user-initiated target change) is
+	// deliberately kept OUT of the useEffect normaliser above (lines 185-231) so loading an
+	// existing saved profile never wipes a value the user intentionally set.
+	const resetModelScopedFields = useCallback(
+		(modelId: string) => {
+			handleModelChangeSideEffects(providerIdentifiers.bedrock, modelId, setApiConfigurationField)
+			setApiConfigurationField("awsModelMaxOutputTokens", undefined)
+			setApiConfigurationField("awsModelContextWindow", undefined)
+		},
+		[setApiConfigurationField],
+	)
+
 	const handleTargetChange = useCallback(
 		(value: string) => {
 			if (value === MANUAL_ARN_TARGET) {
 				setApiConfigurationField("awsBedrockTargetKind", "custom-arn")
 				setApiConfigurationField("awsBedrockInvokeTarget", apiConfiguration.awsCustomArn || "", false)
+				// "custom-arn" as the modelId skips handleModelChangeSideEffects's
+				// awsCustomArn clear (we're restoring the existing ARN above, not
+				// discarding it), but the model-scoped fields below still reset - the
+				// ARN target is itself a model change, even though the specific model
+				// behind it isn't known until the user finishes typing the ARN.
+				resetModelScopedFields("custom-arn")
 				return
 			}
 
@@ -258,8 +284,9 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 			setApiConfigurationField("awsBedrockInvokeTarget", selectedTarget.id)
 			setApiConfigurationField("awsBedrockTargetKind", selectedTarget.targetKind)
 			setApiConfigurationField("apiModelId", selectedTarget.baseModelId)
+			resetModelScopedFields(selectedTarget.baseModelId)
 		},
-		[apiConfiguration.awsCustomArn, availableTargets, setApiConfigurationField],
+		[apiConfiguration.awsCustomArn, availableTargets, resetModelScopedFields, setApiConfigurationField],
 	)
 
 	return (
@@ -461,7 +488,22 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 					onChange={(checked: boolean) => {
 						setApiConfigurationField("awsBedrockStructuredOutput", checked)
 					}}>
-					{t("settings:providers.bedrock.structuredOutputLabel")}
+					{/*
+					 * B4 sweep extra (smoke-test-triage.md tranche B): archive paired this
+					 * label with an info-icon tooltip in addition to the description
+					 * paragraph below; HEAD had dropped the icon. Reuses the existing
+					 * structuredOutputDescription string as the tooltip content rather than
+					 * introducing a new i18n key for the same text.
+					 */}
+					<div className="flex items-center gap-1">
+						<span>{t("settings:providers.bedrock.structuredOutputLabel")}</span>
+						<StandardTooltip content={t("settings:providers.bedrock.structuredOutputDescription")}>
+							<i
+								className="codicon codicon-info text-vscode-descriptionForeground"
+								style={{ fontSize: "12px" }}
+							/>
+						</StandardTooltip>
+					</div>
 				</Checkbox>
 				<div className="text-sm text-vscode-descriptionForeground mt-1 ml-6">
 					{t("settings:providers.bedrock.structuredOutputDescription")}

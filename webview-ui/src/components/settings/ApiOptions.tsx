@@ -841,6 +841,48 @@ const ApiOptions = ({
 									}
 									onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
 								/>
+								{selectedProvider === providerIdentifiers.bedrock && (
+									<div>
+										<label className="block font-medium mb-1">
+											{t("settings:providers.bedrock.contextWindowOverrideLabel")}
+										</label>
+										<VSCodeTextField
+											value={
+												typeof apiConfiguration?.awsModelContextWindow === "number" &&
+												apiConfiguration.awsModelContextWindow > 0
+													? String(apiConfiguration.awsModelContextWindow)
+													: ""
+											}
+											onInput={(event) => {
+												// Treat any non-positive / non-numeric input as "clear the
+												// override". awsModelContextWindow is z.number().optional() in
+												// the schema, so we store undefined to fall back to the
+												// catalog value rather than 0.
+												const raw = (event.target as HTMLInputElement).value.trim()
+												if (!raw) {
+													setApiConfigurationField("awsModelContextWindow", undefined)
+													return
+												}
+												const parsed = Number.parseInt(raw, 10)
+												if (Number.isFinite(parsed) && parsed > 0) {
+													setApiConfigurationField("awsModelContextWindow", parsed)
+												} else {
+													setApiConfigurationField("awsModelContextWindow", undefined)
+												}
+											}}
+											placeholder={t(
+												"settings:providers.bedrock.contextWindowOverridePlaceholder",
+											)}
+											className="w-full"
+											data-testid="bedrock-context-window-override"
+										/>
+										<div className="text-sm text-vscode-descriptionForeground mt-1">
+											{t("settings:providers.bedrock.contextWindowOverrideDescription", {
+												default: selectedModelInfo?.contextWindow?.toLocaleString() ?? "n/a",
+											})}
+										</div>
+									</div>
+								)}
 								{selectedProvider === providerIdentifiers.poe && (
 									<VSCodeTextField
 										value={apiConfiguration?.poeBaseUrl || ""}

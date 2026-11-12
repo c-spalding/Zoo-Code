@@ -191,6 +191,13 @@ describe("Tranche A: D6 Kimi K3 max-tokens cap + clamp", () => {
 		expect(bedrockModels["moonshotai.kimi-k3"].maxTokens).toBe(128_000)
 	})
 
+	// D6-UI (smoke-test-triage.md tranche B, B3): K3 has no reasoning flags, so the
+	// ThinkingBudget max-output control (and its nested probe slot) was previously
+	// unreachable. supportsMaxTokens:true is the catalog-level fix.
+	it("declares supportsMaxTokens: true so the max-output control (and probe) render", () => {
+		expect((bedrockModels["moonshotai.kimi-k3"] as ModelInfo).supportsMaxTokens).toBe(true)
+	})
+
 	it("clamps a modelMaxTokens override above the catalog cap down to the cap", () => {
 		const { info } = resolveBedrockModelInfo({
 			baseModelId: "moonshotai.kimi-k3",
@@ -238,5 +245,31 @@ describe("Tranche A: D6 Kimi K3 max-tokens cap + clamp", () => {
 			modelMaxTokens: 20_000,
 		})
 		expect(info.maxTokens).toBe(20_000)
+	})
+})
+
+// Tranche B (fork/14-ui-parity): D6-UI - any unknown id that falls through to the
+// guess path (guessBedrockModelInfoFromId) gets supportsMaxTokens:true forced on so
+// the max-output control (and its nested "Detect max output tokens" probe slot) is
+// reachable for every future flagless/discovery-surfaced model, not just the catalog
+// entries explicitly updated above.
+describe("Tranche B: D6-UI supportsMaxTokens on the guess path", () => {
+	it("an unknown id (guess path) resolves with supportsMaxTokens: true", () => {
+		const { info } = resolveBedrockModelInfo({
+			baseModelId: "some-vendor.brand-new-model-id",
+			targetId: "some-vendor.brand-new-model-id",
+		})
+		expect(info.supportsMaxTokens).toBe(true)
+	})
+
+	it("a known catalog entry's supportsMaxTokens is NOT overridden by the guess-path forcing (catalog wins)", () => {
+		// anthropic.claude-sonnet-4-5 has no supportsMaxTokens in its catalog entry
+		// (it's a budget model, not a standalone-max-tokens model) - resolving it must
+		// NOT pick up the guess-path's forced true, since it's a real catalog hit.
+		const { info } = resolveBedrockModelInfo({
+			baseModelId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+			targetId: "anthropic.claude-sonnet-4-5-20250929-v1:0",
+		})
+		expect(info.supportsMaxTokens).toBeUndefined()
 	})
 })

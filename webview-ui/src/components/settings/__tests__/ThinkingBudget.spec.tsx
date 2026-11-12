@@ -733,4 +733,176 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
 		})
 	})
+
+	// D2/D3 (smoke-test-triage.md tranche B): adaptive-effort models (budget + explicit
+	// effort array) must show the effort dropdown instead of the thinking-tokens slider,
+	// the binary early-return must relax ONLY for those array-metadata models (cross-provider
+	// guard), and the max-output-tokens control must always render for hybrid-reasoning
+	// models regardless of whether reasoning is enabled.
+	describe("adaptive-effort models and max-output visibility (D2/D3)", () => {
+		// Mirrors the Bedrock catalog's anthropic.claude-sonnet-5 entry: binary + budget +
+		// explicit effort array (archive 06996004a shape).
+		const sonnet5ModelInfo: ModelInfo = {
+			supportsReasoningBinary: true,
+			supportsReasoningBudget: true,
+			supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+			maxTokens: 8192,
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsTemperature: false,
+		}
+
+		// Mirrors anthropic.claude-opus-4-7: budget + explicit effort array, NO binary flag.
+		const opus47ModelInfo: ModelInfo = {
+			supportsReasoningBudget: true,
+			supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+			maxTokens: 8192,
+			contextWindow: 200000,
+			supportsPromptCache: true,
+		}
+
+		// Mirrors openai.gpt-6-sol: effort array only, no budget, no binary (unaffected by D3).
+		const gpt6SolModelInfo: ModelInfo = {
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			maxTokens: 128000,
+			contextWindow: 1_050_000,
+			supportsPromptCache: false,
+		}
+
+		// A budget-only Anthropic model with no binary flag and no explicit effort array
+		// (e.g. anthropic.claude-sonnet-4-5). isAdaptiveEffortModel must be false here.
+		const budgetOnlyModelInfo: ModelInfo = {
+			supportsReasoningBudget: true,
+			maxTokens: 8192,
+			contextWindow: 200000,
+			supportsPromptCache: true,
+		}
+
+		// Cross-provider guard: mirrors OpenRouter's/Requesty's dynamic fetcher shape for
+		// Anthropic 5.x models (binary + budget, but NO explicit effort array). Must keep
+		// the bare on/off checkbox exactly as before D3 - this is the scope-honesty case
+		// the triage explicitly calls out (section 4, B2 row).
+		const openRouterBinaryWithoutArrayModelInfo: ModelInfo = {
+			supportsReasoningBinary: true,
+			supportsReasoningBudget: true,
+			maxTokens: 8192,
+			contextWindow: 200000,
+			supportsPromptCache: true,
+			supportsTemperature: false,
+		}
+
+		it("Sonnet 5 (binary+budget+array): renders effort dropdown, not the thinking-tokens slider", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={sonnet5ModelInfo}
+					apiConfiguration={{ enableReasoningEffort: true, reasoningEffort: "high" }}
+				/>,
+			)
+
+			// "Use reasoning" checkbox is still present (adaptive models keep the checkbox).
+			expect(screen.getByText("settings:providers.useReasoning")).toBeInTheDocument()
+			// Effort dropdown renders instead of the per-thinking-tokens slider.
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+			expect(screen.queryByTestId("reasoning-budget")).not.toBeInTheDocument()
+		})
+
+		it("Sonnet 5: the effort dropdown includes xhigh and max", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={sonnet5ModelInfo}
+					apiConfiguration={{ enableReasoningEffort: true, reasoningEffort: "high" }}
+				/>,
+			)
+
+			expect(screen.getByTestId("select-item-xhigh")).toBeInTheDocument()
+			expect(screen.getByTestId("select-item-max")).toBeInTheDocument()
+		})
+
+		it("Opus 4.7 (budget+array, no binary): renders effort dropdown, not the thinking-tokens slider", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={opus47ModelInfo}
+					apiConfiguration={{ enableReasoningEffort: true, reasoningEffort: "high" }}
+				/>,
+			)
+
+			expect(screen.getByText("settings:providers.useReasoning")).toBeInTheDocument()
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+			expect(screen.queryByTestId("reasoning-budget")).not.toBeInTheDocument()
+		})
+
+		it("GPT-6 Sol (effort-only, no budget): unchanged - renders the effort dropdown via the effort-only path", () => {
+			render(<ThinkingBudget {...defaultProps} modelInfo={gpt6SolModelInfo} apiConfiguration={{}} />)
+
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+			// Effort-only models never render the "Use reasoning" checkbox.
+			expect(screen.queryByText("settings:providers.useReasoning")).not.toBeInTheDocument()
+		})
+
+		it("budget-only Anthropic model (no binary, no effort array): unchanged - renders the thinking-tokens slider when enabled", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={budgetOnlyModelInfo}
+					apiConfiguration={{ enableReasoningEffort: true }}
+				/>,
+			)
+
+			expect(screen.getByTestId("reasoning-budget")).toBeInTheDocument()
+			expect(screen.queryByTestId("reasoning-effort")).not.toBeInTheDocument()
+		})
+
+		it("budget-only Anthropic model: max-output-tokens control is now visible even when reasoning is OFF (D2)", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={budgetOnlyModelInfo}
+					apiConfiguration={{ enableReasoningEffort: false }}
+				/>,
+			)
+
+			// The thinking-tokens slider stays hidden (still gated on enabled/required)...
+			expect(screen.queryByTestId("reasoning-budget")).not.toBeInTheDocument()
+			// ...but the max-output-tokens control (archive-parity, always rendered) is visible.
+			expect(screen.getByText("settings:thinkingBudget.maxTokens")).toBeInTheDocument()
+			// Exactly one slider (the max-output one) renders in this state.
+			expect(screen.getAllByTestId("slider")).toHaveLength(1)
+		})
+
+		it("cross-provider guard: a binary+budget model WITHOUT an explicit effort array keeps the bare checkbox (OpenRouter/Requesty Anthropic 5.x)", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={openRouterBinaryWithoutArrayModelInfo}
+					apiConfiguration={{ enableReasoningEffort: true }}
+				/>,
+			)
+
+			expect(screen.getByText("settings:providers.useReasoning")).toBeInTheDocument()
+			expect(screen.queryByTestId("reasoning-budget")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("reasoning-effort")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("max-output-tokens")).not.toBeInTheDocument()
+			expect(screen.queryByText("settings:thinkingBudget.maxTokens")).not.toBeInTheDocument()
+		})
+
+		it("unticking 'Use reasoning' on an adaptive model (Sonnet 5) is NOT auto-reverted", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={sonnet5ModelInfo}
+					setApiConfigurationField={setApiConfigurationField}
+					apiConfiguration={{ enableReasoningEffort: false, reasoningEffort: "high" }}
+				/>,
+			)
+
+			// The effort-sync effect must be scoped to the effort-ONLY path; for an adaptive
+			// (budget+array) model it must never force enableReasoningEffort back to true.
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+	})
 })
